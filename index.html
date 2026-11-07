@@ -740,6 +740,40 @@ function multiplo(tab, th) {
   return o;
 }
 
+/* ---------- Abóbadas cilíndricas de seção circular (6.2.3) ---------- */
+// Tabelas 15–17 (Figura 7): escoamento uniforme de baixa turbulência — f/ℓ2 e h/ℓ2, ℓ2 = vão (b)
+const T15 = {
+  f5: { h: [0, 1 / 8, 1 / 4, 1 / 2, 1, 5], p: [[0.3, -0.3, -0.6, -0.7, -0.6, -0.2], [-0.5, -0.5, -0.7, -0.7, -0.5, -0.2], [-0.9, -0.6, -0.8, -0.8, -0.4, -0.2],
+    [-1.2, -0.7, -0.9, -0.8, -0.3, -0.2], [-1.4, -0.8, -0.9, -0.9, -0.4, -0.4], [-1.8, -1.0, -1.1, -1.2, -0.8, -0.7]] },
+  f10: { h: [1 / 8, 1 / 4, 1 / 2, 1], p: [[-1.0, -0.4, -0.4, -0.4, -0.4, -0.3], [-1.2, -0.5, -0.4, -0.4, -0.4, -0.3], [-1.5, -1.0, -0.7, -0.5, -0.4, -0.3],
+    [-1.6, -1.0, -0.8, -0.6, -0.4, -0.3]] } };
+// Tabelas 18–20 (Figura 8): escoamento turbulento — série S1 (a/b = 4; f/b, h/b) e série S2 (a/b ≈ 5, f/b ≈ 1/3, hb/b ≈ 1/9)
+const T18 = { f5: { h: [1 / 4, 1 / 2], p: [[-0.3, -0.7, -0.8, -0.6, -0.4, -0.4], [-0.9, -0.9, -0.9, -0.7, -0.5, -0.5]] },
+              f10: { h: [1 / 4, 1 / 2], p: [[-1.0, -0.6, -0.6, -0.6, -0.4, -0.3], [-1.0, -0.8, -0.7, -0.7, -0.5, -0.4]] },
+              S2: [0.4, -0.6, -1.2, -0.9, -0.7, -0.7] };
+const T19 = { f5: { h: [1 / 4, 1 / 2], p: [[-0.8, -0.4, -0.3, -0.2], [-0.8, -0.6, -0.3, -0.2]] },
+              f10: { h: [1 / 4, 1 / 2], p: [[-0.8, -0.4, -0.3, -0.2], [-0.9, -0.6, -0.3, -0.2]] },   // "−03" impresso na norma = −0,3
+              S2: [-0.8, -0.4, -0.2, -0.2] };
+const T20 = { f5: { h: [1 / 4, 1 / 2], E: [-1.6, -2.4], F: [null, -1.2] }, f10: { h: [1 / 4, 1 / 2], E: [-1.4, -1.6], F: [-1.4, -1.8] },
+              S2: { E: -1.5, G: -1.8, H: -1.5 } };
+// interpolação em h/ℓ dentro de cada flecha e depois em f/ℓ entre 1/10 e 1/5 (limitado aos extremos)
+function arcoRow(tab, fr, hr, n) {
+  const row = t => Array.from({ length: n }, (_, i) => iv(t.h, t.p.map(r => r[i]), hr));
+  const t = tAB(fr, 0.1, 0.2), r10 = row(tab.f10), r5 = row(tab.f5);
+  return r10.map((v, i) => lerpAB(v, r5[i], t));
+}
+function arco(met, fr, hr) {
+  if (met === 'S2') return { perp: T18.S2.slice(), par: T19.S2.slice(), loc: { ...T20.S2 } };
+  if (met === 'S1') {
+    const t = tAB(fr, 0.1, 0.2);
+    const E = lerpAB(iv(T20.f10.h, T20.f10.E, hr), iv(T20.f5.h, T20.f5.E, hr), t);
+    const F10 = iv(T20.f10.h, T20.f10.F, hr), F5 = iv(T20.f5.h, T20.f5.F, hr);   // F não tabelado para f/b = 1/5, h/b = 1/4
+    return { perp: arcoRow(T18, fr, hr, 6), par: arcoRow(T19, fr, hr, 4),
+      loc: { E, F: F5 == null ? F10 : lerpAB(F10, F5, t) } };
+  }
+  return { perp: arcoRow(T15, fr, hr, 6), par: [-0.8, -0.6, -0.3, -0.2], loc: { AD1: -1.8 } };
+}
+
 /* ---------- Tabelas 24 e 25 — coberturas isoladas ---------- */
 function tabela24(tg) { // vento atingindo primeiro a borda alta ("descendente")
   tg = Math.max(0, Math.min(0.7, tg));
@@ -854,6 +888,33 @@ function calc(ed) {
     zTop = h;
     out.locais.push({ grupo: 'cobertura', id: 'borda', nome: 'Faixas de borda (y = 0,15 b) — valor mais severo dos diagramas da Tabela 9 para o caso', cpe: t9.locBorda, ref: 'Tabela 9' });
   }
+  else if (tipo === 'arco') {
+    const f = Math.max(0.01, +ed.f || b / 5), met = ed.metArco || 'T15', fr = f / b, hr = h / b, A = arco(met, fr, hr);
+    tabela = met === 'T15' ? 'Tabelas 15 a 17' : 'Tabelas 18 a 20 (série ' + met + ')';
+    out.geo.f = f; out.geo.metArco = met; zTop = h + f;
+    if (met === 'T15') {
+      if (fr < 0.1 - 1e-9 || fr > 0.2 + 1e-9) avisos.push('f/ℓ2 fora de 1/10 a 1/5: adotados os valores extremos da Tabela 15.');
+      if (fr < 0.15 && hr < 1 / 8) avisos.push('Para f/ℓ2 = 1/10 a Tabela 15 começa em h/ℓ2 = 1/8: adotados os valores de 1/8.');
+      if (a < 0.5 * b || a > 3 * b) avisos.push('Tabelas 15 a 17 ensaiadas para 0,5·ℓ2 < ℓ1 < 3·ℓ2 (ℓ1 = comprimento, ℓ2 = vão): fora da faixa.');
+      avisos.push('Tabelas 15 a 17: ensaios em escoamento de baixa turbulência — a norma os considera orientação para o projeto (6.2.3).');
+    } else if (met === 'S1') {
+      if (fr < 0.1 - 1e-9 || fr > 0.2 + 1e-9 || hr < 0.25 - 1e-9 || hr > 0.5 + 1e-9) avisos.push('Série S1 ensaiada para f/b de 1/10 a 1/5 e h/b de 1/4 a 1/2: valores limitados aos extremos.');
+      avisos.push('Série S1 (Tabelas 18 a 20): escoamento turbulento, terreno entre as Categorias I e II, modelo com a/b = 4.');
+    } else avisos.push('Série S2 (Tabelas 18 a 20): a/b ≈ 5, f/b ≈ 1/3, hb/b ≈ 1/9 — terreno entre as Categorias III e IV. Valores fixos.');
+    const nomes6 = ['1 — arranque de barlavento', '2', '3 — junto ao topo (barlavento)', '4 — junto ao topo (sotavento)', '5', '6 — arranque de sotavento'];
+    cob90 = A.perp.map((ce, i) => R(0, a, b * i / 6, b * (i + 1) / 6, String(i + 1), ce, 'Parte ' + nomes6[i]));
+    if (met === 'T15') cob0 = ['A', 'B', 'C', 'D'].map((k, i) => R(a * i / 4, a * (i + 1) / 4, 0, b, k, A.par[i], { A: 'A1 + A2 — quarto de barlavento', B: 'B — 2º quarto', C: 'C — 3º quarto', D: 'D1 + D2 — quarto de sotavento' }[k]));
+    else { const t3 = Math.min(b / 3, a / 4); cob0 = [R(0, t3, 0, b, 'A', A.par[0], 'A — faixa de b/3 junto à empena de barlavento'), R(t3, 2 * t3, 0, b, 'B', A.par[1], 'B — 2ª faixa de b/3'), R(2 * t3, 3 * t3, 0, b, 'C', A.par[2], 'C — 3ª faixa de b/3'), R(3 * t3, a, 0, b, 'D', A.par[3], 'D — restante')]; }
+    if (met === 'T15') out.locais.push({ grupo: 'cobertura', id: 'AD1', nome: `Faixas A1 e D1 junto às empenas (0,1·ℓ1 = ${fmtN(0.1 * b)} m, Figura 7-b) — vento oblíquo`, cpe: -1.8, ref: 'Tabela 17' });
+    else if (met === 'S1') {
+      out.locais.push({ grupo: 'cobertura', id: 'E', nome: `Faixas E junto às empenas (b/10 = ${fmtN(b / 10)} m) — vento oblíquo`, cpe: A.loc.E, ref: 'Tabela 20' });
+      out.locais.push({ grupo: 'cobertura', id: 'F', nome: `Faixas F junto aos arranques (b/10 = ${fmtN(b / 10)} m) — vento oblíquo`, cpe: A.loc.F, ref: 'Tabela 20' });
+    } else {
+      out.locais.push({ grupo: 'cobertura', id: 'E', nome: `Faixas E nas extremidades (b/10 = ${fmtN(b / 10)} m)`, cpe: -1.5, ref: 'Tabela 20' });
+      out.locais.push({ grupo: 'cobertura', id: 'G', nome: `Faixa G — b/6 de cada lado do topo, até a/4 das empenas`, cpe: -1.8, ref: 'Tabela 20' });
+      out.locais.push({ grupo: 'cobertura', id: 'H', nome: 'Faixa H — b/6 de cada lado do topo, trecho central', cpe: -1.5, ref: 'Tabela 20' });
+    }
+  }
   else { // múltiplos t10 / t11 / t12
     const n = Math.max(2, Math.round(+ed.nVaos || 2)), ap = a / n, m = multiplo(tipo, th);
     tabela = { t10: 'Tabela 10', t11: 'Tabela 11', t12: 'Tabela 12' }[tipo];
@@ -864,7 +925,8 @@ function calc(ed) {
     // 1ª água de cada tramo (a*, c*, m*, x*): inclinada a θ (T10), a 60° (T11) ou face vertical (T12);
     // fração da projeção em planta só para o desenho
     const p1 = tipo === 't10' ? 'água de barlavento' : tipo === 't11' ? 'água a 60°' : 'face vertical', p2 = tipo === 't10' ? 'água de sotavento' : 'água inclinada';
-    const frac = { t10: 0.5, t11: 0.25, t12: 0.08 }[tipo];
+    const frac = tipo === 't11' ? Math.max(0.05, Math.min(0.5, tg / (Math.tan(60 * D2R_) + tg))) : { t10: 0.5, t12: 0.08 }[tipo];
+    out.geo.frac = frac;
     const NOMES = { a: '1º tramo — ' + p1, b: '1º tramo — ' + p2, c: '2º tramo — ' + p1, d: '2º tramo — ' + p2,
       m: 'Tramos intermediários — ' + p1, n: 'Tramos intermediários — ' + p2, x: 'Último tramo — ' + p1, z: 'Último tramo — ' + p2 };
     const dentes = s => { const z = [];
@@ -886,14 +948,14 @@ function calc(ed) {
   }
   if (!cob180) cob180 = cob0.map(flipX);
   if (!cob270) cob270 = cob90.map(flipY);
-  out.geo.zTop = zTop; out.tabela = tabela;
+  out.geo.zTop = zTop; out.tabela = tabela; out.geo.alto = ed.alto || 'S';
 
   // ---------- Cpi ----------
   const cpi = calcCpi(ed.cpi || { modo: 'quatro' }, { t6, L1, Lc1, a, b }, avisos);
   out.cpiTxt = cpi.txt;
   const ventos = [[0, paredes0(0), cob0], [90, paredes90(90), cob90], [180, paredes0(180), cob180], [270, paredes90(270), cob270]];
   for (const [dir, par, cob] of ventos) out.casos.push({ dir, paredes: par, cobertura: cob, cpi: cpi.porDir[dir] });
-  out.simetrico = !(tipo === 't8' || tipo === 't11' || tipo === 't12' || cpi.assimetrico);
+  out.simetrico = !(tipo === 't8' || tipo === 't11' || tipo === 't12' || tipo === 'arco' && false || cpi.assimetrico);
   return out;
 }
 
@@ -1365,11 +1427,12 @@ pf('btnXls').onclick=async()=>{
    ============================================================ */
 const TIPOS_ED = {
   t7: 'Galpão duas águas (Tabela 7)', t8: 'Galpão uma água (Tabela 8)', t9: 'Duas águas com calha central (Tabela 9)',
+  arco: 'Galpão em arco — abóbada cilíndrica (Tabelas 15 a 20)',
   t10: 'Telhados múltiplos simétricos (Tabela 10)', t11: 'Múltiplos assimétricos, água a 60° (Tabela 11)', t12: 'Múltiplos com água vertical — shed (Tabela 12)',
   iso1: 'Cobertura isolada uma água (Tabela 24)', iso2: 'Cobertura isolada duas águas (Tabela 25)',
   mar1: 'Marquise uma água (Tabela 24)', mar2: 'Marquise duas águas (Tabela 25)',
 };
-const ED_DEFAULT = { tipo: 't7', a: 50, b: 30, h: 6, incl: 10, hp: 0.05, nVaos: 4, alto: 'S', l2: 10, calha: false, zRef: null,
+const ED_DEFAULT = { tipo: 't7', a: 50, b: 30, h: 6, incl: 10, hp: 0.05, nVaos: 4, alto: 'S', l2: 10, calha: false, zRef: null, f: 6, metArco: 'T15',
   cpi: { modo: 'quatro', par: '0-180', face: 0, r1: 1, altaSuccao: false, r2: 1, zona: 'q2', v0: -0.3, v90: -0.3, v180: -0.3, v270: -0.3 } };
 let ed = JSON.parse(JSON.stringify(ED_DEFAULT));
 try { const s = JSON.parse(localStorage.getItem('v0map.ed') || 'null'); if (s) { Object.assign(ed, s); ed.cpi = { ...ED_DEFAULT.cpi, ...(s.cpi || {}) }; } } catch (e) {}
@@ -1433,6 +1496,132 @@ function plantaSVG(caso, res, vmax) {
   return g + '</svg>';
 }
 
+
+/* --- corte da edificação com as cargas (setas normais à superfície, comprimento ∝ |p|) --- */
+// Altura da cobertura no ponto (x, y) da planta, conforme o tipo
+function alturaCob(res, x, y) {
+  const g = res.geo, { a, b, h, tg } = g;
+  switch (res.tipo) {
+    case 't7': return h + tg * (b / 2 - Math.abs(y - b / 2));
+    case 't8': return g.alto === 'N' ? h + tg * y : h + tg * (b - y);
+    case 't9': return h - tg * (b / 2 - Math.abs(y - b / 2));
+    case 'arco': { const f = g.f, R = (b * b / 4 + f * f) / (2 * f), yc = h + f - R; return yc + Math.sqrt(Math.max(0, R * R - (y - b / 2) ** 2)); }
+    case 't10': case 't11': case 't12': {
+      const ap = g.ap, xm = ((x % ap) + ap) % ap;
+      if (res.tipo === 't10') return h + tg * (ap / 2 - Math.abs(xm - ap / 2));
+      if (res.tipo === 't11') { const p = g.frac * ap; return xm < p ? h + Math.tan(60 * Math.PI / 180) * xm : h + tg * (ap - xm); }
+      return h + tg * (ap - xm);
+    }
+  }
+  return h;
+}
+function corteSVG(caso, res, pmax) {
+  const g = res.geo, { a, b } = g, d = caso.dir, ao = d === 0 || d === 180, L = ao ? a : b;
+  const ysec = res.tipo === 't7' || res.tipo === 't9' || res.tipo === 't8' || res.tipo === 'arco' ? b / 4 : b / 2;
+  const plan = s => d === 0 ? [s, ysec] : d === 180 ? [a - s, ysec] : d === 90 ? [a / 2, s] : [a / 2, b - s];
+  const zAt = s => { const [x, y] = plan(s); return alturaCob(res, x, y); };
+  // perfil: amostragem fina, com degrau vertical onde houver face vertical (Tabela 12)
+  const N = 480, pts = [];
+  for (let i = 0; i <= N; i++) {
+    const s = L * i / N, z = zAt(Math.min(L - 1e-9, s + (i === 0 ? 1e-9 : 0)));
+    if (pts.length && Math.abs(z - pts[pts.length - 1][1]) > Math.max(0.3, g.tg * (g.ap || 1) * 0.4)) pts.push([s, pts[pts.length - 1][1]]);
+    pts.push([s, z]);
+  }
+  const zmax = Math.max(...pts.map(p => p[1]));
+  const W = 600, H = 300, mx = 70, myTop = 70, myBot = 34;
+  const sx = (W - 2 * mx) / L, sz = Math.max(sx, Math.min(4 * sx, (H - myTop - myBot) / zmax));
+  const X = s => mx + s * sx, Z = z => H - myBot - z * sz;
+  const fmt1 = v => fmt(v, 1);
+  let o = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI,Arial,sans-serif" font-size="10.5">`;
+  o += `<line x1="${X(0) - 30}" x2="${X(L) + 30}" y1="${Z(0)}" y2="${Z(0)}" stroke="#4a5462" stroke-width="1.2"/>`;
+  for (let k = 0; k < 14; k++) o += `<line x1="${X(0) - 30 + k * (X(L) - X(0) + 60) / 14}" x2="${X(0) - 38 + k * (X(L) - X(0) + 60) / 14}" y1="${Z(0)}" y2="${Z(0) + 6}" stroke="#8a94a3"/>`;
+  const zw0 = pts[0][1], zw1 = pts[pts.length - 1][1];
+  o += `<polyline fill="#f4f6f9" stroke="#1b2430" stroke-width="2" points="${X(0)},${Z(0)} ${pts.map(p => X(p[0]) + ',' + Z(p[1])).join(' ')} ${X(L)},${Z(0)}"/>`;
+  const zoneAt = (x, y) => caso.cobertura.find(z => x >= z.x0 - 1e-6 && x <= z.x1 + 1e-6 && y >= z.y0 - 1e-6 && y <= z.y1 + 1e-6);
+  const seta = (x, y, nx, ny, p) => { // (x, y) na superfície (px), normal para fora (nx, ny)
+    const len = 8 + 36 * Math.min(1, Math.abs(p) / (pmax || 1)), col = p < 0 ? '#2b6cc4' : '#d64c32';
+    const [x0, y0, x1, y1] = p < 0 ? [x, y, x + nx * len, y + ny * len] : [x + nx * len, y + ny * len, x, y];
+    const ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+    return `<line x1="${x0}" y1="${y0}" x2="${x1 - ux * 5}" y2="${y1 - uy * 5}" stroke="${col}" stroke-width="1.6"/><path d="M${x1},${y1} L${x1 - ux * 7 - uy * 3.5},${y1 - uy * 7 + ux * 3.5} L${x1 - ux * 7 + uy * 3.5},${y1 - uy * 7 - ux * 3.5} Z" fill="${col}"/>`;
+  };
+  // setas na cobertura, por trecho do perfil
+  const runs = [], nA = 26;
+  for (let k = 0; k < nA; k++) {
+    const s = L * (k + 0.5) / nA, i = Math.min(pts.length - 2, pts.findIndex(p => p[0] >= s));
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i + 1] || pts[i];
+    const dxs = (X(p1[0]) - X(p0[0])), dzs = (Z(p1[1]) - Z(p0[1])), ln = Math.hypot(dxs, dzs) || 1;
+    let nx = dzs / ln, ny = -dxs / ln; if (ny > 0) { nx = -nx; ny = -ny; }
+    const [x, y] = plan(s), z = zoneAt(x, y); if (!z) continue;
+    const p = pNoc(z.p), sv = zAt(s);
+    o += seta(X(s), Z(sv), nx, ny, p);
+    const last = runs[runs.length - 1];
+    if (last && last.id === z.id) { last.s1 = s; last.zmax = Math.max(last.zmax, sv); } else runs.push({ id: z.id, p, s0: s, s1: s, zmax: sv });
+  }
+  // faces verticais (Tabela 12): setas horizontais
+  for (let i = 1; i < pts.length; i++) if (pts[i][0] === pts[i - 1][0] && Math.abs(pts[i][1] - pts[i - 1][1]) > 1e-6) {
+    const s = pts[i][0], zl = Math.min(pts[i][1], pts[i - 1][1]), zh = Math.max(pts[i][1], pts[i - 1][1]);
+    const out = (pts[i + 1] ? pts[i + 1][1] : zl) < (pts[i - 2] ? pts[i - 2][1] : zl) ? 1 : -1;  // para o lado mais baixo
+    const [x, y] = plan(s + (out > 0 ? -1 : 1) * 1e-3 * L), z = zoneAt(x, y); if (!z) continue;
+    const p = pNoc(z.p);
+    for (let k = 1; k <= 2; k++) o += seta(X(s), Z(zl + (zh - zl) * k / 3), out, 0, p);
+  }
+  for (const r of runs) {
+    const sm = (r.s0 + r.s1) / 2, yl = Z(r.zmax) - 8 - 40 * Math.min(1, Math.abs(r.p) / (pmax || 1)) - 6;
+    if (X(r.s1) - X(r.s0) < 14 && runs.length > 10) continue;
+    o += `<text x="${X(sm)}" y="${Math.max(12, yl)}" text-anchor="middle" fill="#1b2430"><tspan font-weight="700">${r.id}</tspan> ${fmt1(r.p)}</text>`;
+  }
+  // paredes de barlavento e sotavento
+  const ladoW = { 0: 'W', 180: 'E', 90: 'S', 270: 'N' }[d], ladoL = { W: 'E', E: 'W', S: 'N', N: 'S' }[ladoW];
+  for (const [lado, s, zt, nx] of [[ladoW, 0, zw0, -1], [ladoL, L, zw1, 1]]) {
+    const w = caso.paredes.find(q => q.lado === lado); if (!w) continue;
+    const p = pNoc(w.p);
+    for (let k = 1; k <= 3; k++) o += seta(X(s), Z(zt * k / 4), nx, 0, p);
+    o += `<text x="${X(s) + nx * 40}" y="${Z(zt / 2) - 26}" text-anchor="middle" fill="#1b2430"><tspan font-weight="700">${w.id}</tspan> ${fmt1(p)}</text>`;
+  }
+  o += `<g transform="translate(${X(0) - 50} ${Z(zw0) - 34})"><line x1="-16" x2="12" y1="0" y2="0" stroke="#e0218a" stroke-width="3"/><path d="M12,-6 L22,0 L12,6 Z" fill="#e0218a"/></g>`;
+  o += `<text x="${X(0) - 46}" y="${Z(zw0) - 44}" text-anchor="middle" font-weight="700" fill="#e0218a">${d}°</text>`;
+  o += `<text x="${X(L)}" y="${H - 8}" text-anchor="end" fill="#6b7685">Corte ${ao ? 'longitudinal (ao longo de a)' : 'transversal (ao longo de b)'} · p em kgf/m²${sz > sx * 1.01 ? ' · escala vertical ampliada' : ''}</text>`;
+  return o + '</svg>';
+}
+// Coberturas isoladas: um corte por carregamento, com o sentido das ações indicado na Tabela 24/25
+function corteIsoSVG(res, q) {
+  const g = res.geo, W = 600, H = 150, out = [];
+  const draw = (titulo, perfil, cps, sentidoPos) => { // perfil: [[s,z]...] (0..1), cps: [cp no início, cp no fim] por água
+    let o = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI,Arial,sans-serif" font-size="10.5">`;
+    const X = s => 90 + s * 420, Z = z => 112 - z * 50;
+    o += `<line x1="70" x2="530" y1="${Z(-0.6)}" y2="${Z(-0.6)}" stroke="#8a94a3"/>`;
+    for (const [s] of [perfil[0], perfil[perfil.length - 1]]) o += `<line x1="${X(s)}" x2="${X(s)}" y1="${Z(-0.6)}" y2="${Z(perfil.find(p => p[0] === s)[1])}" stroke="#8a94a3" stroke-width="3"/>`;
+    o += `<polyline fill="none" stroke="#1b2430" stroke-width="2.5" points="${perfil.map(p => X(p[0]) + ',' + Z(p[1])).join(' ')}"/>`;
+    const pm = Math.max(...cps.flat().map(Math.abs), 0.1);
+    for (let w = 0; w < perfil.length - 1; w++) {
+      const [sA, zA] = perfil[w], [sB, zB] = perfil[w + 1], [cA, cB] = cps[w];
+      for (let k = 0; k <= 4; k++) {
+        const t = (k + 0.5) / 5.0, s = sA + (sB - sA) * t, z = zA + (zB - zA) * t, cp = cA + (cB - cA) * t;
+        const down = (cp > 0) === (sentidoPos === 'baixo'), len = 8 + 30 * Math.abs(cp) / pm, x = X(s), y = Z(z), col = down ? '#d64c32' : '#2b6cc4';
+        const [y0, y1] = down ? [y - len, y - 4] : [y - 2, y - len];
+        o += `<line x1="${x}" x2="${x}" y1="${y0}" y2="${y1}" stroke="${col}" stroke-width="1.6"/><path d="M${x},${y1 + (down ? 4 : -4)} l-3.5,${down ? -7 : 7} l7,0 Z" fill="${col}"/>`;
+      }
+      o += `<text x="${X(sA) + 6}" y="${Z(zA) - 44}" fill="#1b2430">${fmt(cA * q, 1)}</text><text x="${X(sB) - 6}" y="${Z(zB) - 44}" text-anchor="end" fill="#1b2430">${fmt(cB * q, 1)}</text>`;
+    }
+    o += `<g transform="translate(40 ${Z(0.2)})"><line x1="-14" x2="12" y1="0" y2="0" stroke="#e0218a" stroke-width="3"/><path d="M12,-6 L22,0 L12,6 Z" fill="#e0218a"/></g>`;
+    o += `<text x="${W - 10}" y="14" text-anchor="end" font-weight="700" fill="#1b2430">${titulo}</text><text x="${W - 10}" y="${H - 6}" text-anchor="end" fill="#6b7685">p em kgf/m² · vermelho = para baixo, azul = para cima</text>`;
+    out.push(o + '</svg>');
+  };
+  const i = res.iso;
+  if (!i.duas) {
+    const pf = [[0, 0.7], [1, 0]], pfA = [[0, 0], [1, 0.7]];
+    draw('Carregamento 1 — vento pela borda alta', pf, [[i.desc.c1.BA, i.desc.c1.BB]], 'baixo');
+    if (i.desc.c2) draw('Carregamento 2 — vento pela borda alta', pf, [[i.desc.c2.BA, i.desc.c2.BB]], 'baixo');
+    draw('Carregamento 1 — vento pela borda baixa', pfA, [[i.asc.c1.BB, i.asc.c1.BA]], 'baixo');
+    if (i.asc.c2) draw('Carregamento 2 — vento pela borda baixa', pfA, [[i.asc.c2.BB, i.asc.c2.BA]], 'baixo');
+  } else {
+    const t = i.t25, pf = i.calha ? [[0, 0.7], [0.5, 0], [1, 0.7]] : [[0, 0], [0.5, 0.7], [1, 0]], sp = i.calha ? 'cima' : 'baixo';
+    draw('Carregamento 1', pf, [[t.c1.pb, t.c1.pb], [t.c1.ps, t.c1.ps]], sp);
+    draw('Carregamento 2', pf, [[t.c2.pb, t.c2.pb], [t.c2.ps, t.c2.ps]], sp);
+  }
+  return out.join('');
+}
+
 /* --- interface --- */
 const cg = id => document.getElementById(id);
 function cgForm() {
@@ -1442,7 +1631,13 @@ function cgForm() {
   h += f('cgA', iso ? 'Comprimento a (m)' : 'Comprimento a — maior (m)', ed.a, 'step="0.1" min="0.5"');
   h += f('cgB', iso ? 'Largura b (m)' : 'Largura b — menor (m)', ed.b, 'step="0.1" min="0.5"');
   h += f('cgH', iso ? 'Altura livre h até a aresta mais baixa (m)' : 'Altura h até o beiral (m)', ed.h, 'step="0.1" min="0.5"');
-  h += f('cgI', 'Inclinação i (%)', ed.incl, 'step="0.5" min="0"');
+  if (t === 'arco') {
+    h += f('cgF', 'Flecha do arco f (m)', ed.f, 'step="0.1" min="0.1"');
+    h += `<label for="cgMet">Coeficientes</label><select id="cgMet">
+      <option value="T15"${ed.metArco === 'T15' ? ' selected' : ''}>Tabelas 15–17 (baixa turbulência)</option>
+      <option value="S1"${ed.metArco === 'S1' ? ' selected' : ''}>Tabelas 18–20, série S1 (Cat. I–II)</option>
+      <option value="S2"${ed.metArco === 'S2' ? ' selected' : ''}>Tabelas 18–20, série S2 (Cat. III–IV)</option></select>`;
+  } else h += f('cgI', 'Inclinação i (%)', ed.incl, 'step="0.5" min="0"');
   if (t === 't8') h += `<label for="cgAlto">Beiral alto</label><select id="cgAlto"><option value="S"${ed.alto === 'S' ? ' selected' : ''}>Lado sul (y = 0)</option><option value="N"${ed.alto === 'N' ? ' selected' : ''}>Lado norte (y = b)</option></select>`;
   if (t === 't9') h += `<label for="cgHp">h'p / h</label><select id="cgHp"><option value="0.05"${+ed.hp <= 0.05 ? ' selected' : ''}>≤ 0,05</option><option value="0.15"${+ed.hp > 0.05 ? ' selected' : ''}>0,10 a 0,20</option></select>`;
   if (/^t1[012]$/.test(t)) h += f('cgN', 'Nº de tramos (vãos)', ed.nVaos, 'step="1" min="2"');
@@ -1473,7 +1668,7 @@ function cgForm() {
   const num = v => parseFloat(String(v).replace(',', '.'));
   bind('cgTipo', v => { ed.tipo = v; ed.zRef = null; }); bind('cgA', v => ed.a = num(v)); bind('cgB', v => ed.b = num(v)); bind('cgH', v => ed.h = num(v));
   bind('cgI', v => ed.incl = num(v)); bind('cgAlto', v => ed.alto = v); bind('cgHp', v => ed.hp = num(v)); bind('cgN', v => ed.nVaos = num(v));
-  bind('cgL2', v => ed.l2 = num(v)); bind('cgCalha', v => ed.calha = v === '1'); bind('cgZ', v => ed.zRef = v === '' ? null : num(v));
+  bind('cgL2', v => ed.l2 = num(v)); bind('cgF', v => ed.f = num(v)); bind('cgMet', v => ed.metArco = v); bind('cgCalha', v => ed.calha = v === '1'); bind('cgZ', v => ed.zRef = v === '' ? null : num(v));
   bind('cgCpi', v => c.modo = v); bind('cgPar', v => c.par = v); bind('cgFace', v => c.face = +v); bind('cgR1', v => c.r1 = num(v));
   bind('cgAS', v => c.altaSuccao = v === '1'); bind('cgR2', v => c.r2 = num(v)); bind('cgZona', v => c.zona = v);
   for (const d of [0, 90, 180, 270]) bind('cgV' + d, v => c['v' + d] = num(v));
@@ -1484,7 +1679,7 @@ function renderCargas(rebuildForm) {
   const ok = ed.a > 0 && ed.b > 0 && ed.h > 0 && ed.incl >= 0;
   if (!ok) { cg('cgOut').innerHTML = '<p class="hint">Informe a, b, h e a inclinação.</p>'; return; }
   const L = cargasCalc(), { res, pr, q, zRef } = L, f1 = v => v == null ? '—' : fmt(v, 1);
-  cg('cgTh').textContent = `θ = ${fmt(res.geo.th, 2)}°`;
+  cg('cgTh').textContent = res.tipo === 'arco' ? `f/b = ${fmt(res.geo.f / res.geo.b, 3)} · h/b = ${fmt(res.geo.hb, 3)}` : `θ = ${fmt(res.geo.th, 2)}°`;
   let h = `<div class="sum">
     <div><span>V0 adotado</span><b>${fmt(L.P.v0, 2)} m/s</b></div>
     <div><span>Altura de ref. z</span><b>${fmt(zRef, 2)} m</b></div>
@@ -1492,6 +1687,7 @@ function renderCargas(rebuildForm) {
     <div><span>q(z)</span><b>${fmt(q, 1)} kgf/m²</b></div></div>`;
   if (res.avisos.length) h += `<div class="note" style="margin-bottom:10px">${res.avisos.map(escapeHtml).join('<br>')}</div>`;
   if (res.iso) {
+    h += `<div class="cgdia">${corteIsoSVG(res, q)}</div>`;
     h += `<table class="prof"><thead><tr><th style="text-align:left">Caso</th><th style="text-align:left">Zona</th><th>cp</th><th>p (kgf/m²)</th></tr></thead><tbody>` +
       pr.rows.map(r => `<tr><td style="text-align:left">${r.caso} — ${r.carr}</td><td style="text-align:left">${r.nome}</td><td>${fmt(r.cp, 2)}</td><td><b>${f1(r.p)}</b></td></tr>`).join('') + '</tbody></table>';
     h += `<p class="hint">Sinal positivo = sentido indicado na ${res.tabela} (as duas faces da cobertura já estão englobadas; os carregamentos 1 e 2 são verificações independentes). ` +
@@ -1505,7 +1701,7 @@ function renderCargas(rebuildForm) {
   h += `<div class="cgtabs">${dirs.map(d => `<button data-d="${d}" class="${d === cgDir ? 'primary' : ''}">Vento ${d}°</button>`).join('')}
     ${res.simetrico ? '<span class="hint">(180° e 270° espelhados)</span>' : ''}</div>`;
   const caso = pr.casos.find(c => c.dir === cgDir);
-  h += `<div class="cgdia">${plantaSVG(caso, res, vmax)}</div>`;
+  h += `<div class="cgdia">${plantaSVG(caso, res, vmax)}</div><div class="cgdia" style="margin-top:8px">${corteSVG(caso, res, vmax)}</div>`;
   h += `<p class="hint">cpi neste caso: ${caso.cpi.map(v => fmt(v, 2)).join(' ou ')} — ${escapeHtml(res.cpiTxt)} Cores: azul = sucção, vermelho = sobrepressão (valor mais nocivo).</p>`;
   const linhas = (arr, grupo) => arr.map(z => `<tr><td style="text-align:left">${grupo}</td><td style="text-align:left"><b>${z.id}</b> — ${escapeHtml(z.nome)}</td><td>${fmt(z.ce, 2)}</td><td>${f1(z.p.min)}</td><td>${f1(z.p.max)}</td></tr>`).join('');
   h += `<table class="prof"><thead><tr><th style="text-align:left">Elemento</th><th style="text-align:left">Zona</th><th>Ce</th><th>p mín (kgf/m²)</th><th>p máx (kgf/m²)</th></tr></thead><tbody>` +
@@ -1543,6 +1739,7 @@ function cargasMemorialHTML() {
   <tr><td>Coeficientes</td><td>Paredes: Tabela 6${res.geo.bandaT6 ? ' (' + res.geo.bandaT6 + ')' : ''} · Cobertura: ${res.tabela}. p = q·(Ce − cpi), em kgf/m² (+ sobrepressão, − sucção).</td></tr></table>`;
   if (res.avisos.length) h += `<p class="note">${res.avisos.map(escapeHtml).join('<br>')}</p>`;
   if (res.iso) {
+    h += `<div style="margin-top:8px">${corteIsoSVG(res, q)}</div>`;
     h += `<table style="margin-top:8px"><tr><th>Caso</th><th>Zona</th><th class="n">cp</th><th class="n">p (kgf/m²)</th></tr>` +
       pr.rows.map(r => `<tr><td>${r.caso} — ${r.carr}</td><td>${r.nome}</td><td class="n">${fmt(r.cp, 2)}</td><td class="n">${f1(r.p)}</td></tr>`).join('') + '</table>' +
       `<p>Força de atrito, vento paralelo à geratriz (7.2.2): Ft = 0,5·q·a·b = <b>${f1(pr.Ft)} kgf</b>. Elementos de vedação (7.2.6): cp = ±2,0 → <b>±${f1(2 * q)} kgf/m²</b>.</p>`;
@@ -1550,7 +1747,7 @@ function cargasMemorialHTML() {
   }
   const vmax = Math.max(...pr.casos.flatMap(c => [...c.paredes, ...c.cobertura].flatMap(z => [Math.abs(z.p.min), Math.abs(z.p.max)])));
   const dirs = res.simetrico ? [0, 90] : [0, 90, 180, 270];
-  h += `<div class="charts">${dirs.map(d => `<div><h3>Vento ${d}° — p (kgf/m², valor mais nocivo)</h3>${plantaSVG(pr.casos.find(c => c.dir === d), res, vmax)}</div>`).join('')}</div>`;
+  h += `<div class="charts">${dirs.map(d => `<div><h3>Vento ${d}° — planta, p (kgf/m², valor mais nocivo)</h3>${plantaSVG(pr.casos.find(c => c.dir === d), res, vmax)}</div><div><h3>Vento ${d}° — corte</h3>${corteSVG(pr.casos.find(c => c.dir === d), res, vmax)}</div>`).join('')}</div>`;
   for (const d of dirs) {
     const c = pr.casos.find(x => x.dir === d), uniq = arr => arr.filter((z, i, s) => s.findIndex(o => o.id === z.id) === i);
     h += `<table style="margin-top:8px"><tr><th colspan="5">Vento ${d}° — cpi ${c.cpi.map(v => fmt(v, 2)).join(' ou ')}</th></tr><tr><th>Elemento / zona</th><th class="n">Ce</th><th class="n">p mín</th><th class="n">p máx</th></tr>` +
