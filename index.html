@@ -72,7 +72,11 @@ button:hover{filter:brightness(.96)}
 .svrow{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px}
 .svlink{display:flex;justify-content:center;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:var(--chip);color:var(--ink);text-decoration:none;font-size:13px}
 .svlink:hover{filter:brightness(.96)}
-.tools{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:12px}
+.tools{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.vtabs{display:flex;gap:6px;flex-wrap:wrap}
+.vt{padding:7px 14px;font-weight:600}
+.vt.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.vnav{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--panel)}
 .cgtabs{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0 8px}
 .cgtabs button{padding:5px 10px;font-size:12.5px}
 .cgdia{border:1px solid var(--line);border-radius:9px;background:#fff;padding:4px}
@@ -91,7 +95,7 @@ button:hover{filter:brightness(.96)}
 /* --- janela Perfil de vento --- */
 .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:center;justify-content:center;z-index:2000;padding:16px}
 .modal[hidden]{display:none}
-.dlg{background:var(--panel);color:var(--ink);border-radius:12px;width:min(1180px,100%);max-height:100%;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.dlg{background:var(--panel);color:var(--ink);border-radius:12px;width:min(1240px,100%);max-height:100%;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)}
 .dlg header{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--line)}
 .dlg header h2{margin:0;font-size:17px}
 .dlg .body{display:grid;grid-template-columns:330px 1fr;gap:18px;padding:16px 18px}
@@ -155,8 +159,7 @@ table.prof th{color:var(--muted);font-weight:600}
   <div class="card">
     <div id="out"><div class="empty">Escolha um ponto para obter o V0 interpolado.</div></div>
     <div class="tools">
-      <button id="btnCargas" disabled title="Cargas por setor: paredes (fechamento) e cobertura"><span class="ic">🏠</span>Cargas</button>
-      <button id="btnProfile" disabled title="Perfil de vento: Vk e pressão ao longo da altura"><span class="ic">🌬️</span>Perfil</button>
+      <button id="btnVento" disabled title="Perfil de vento e cargas na edificação (paredes e cobertura)"><span class="ic">🌬️</span>Vento</button>
       <button id="btnPrint" disabled title="Imprimir relatório"><span class="ic">🖨️</span>Imprimir</button>
       <button id="btnXls" disabled title="Exportar para Excel (.xlsx)"><span class="ic">📊</span>XLS</button>
       <button id="btnPdf" disabled title="Salvar relatório em PDF"><span class="ic">📄</span>PDF</button>
@@ -384,15 +387,14 @@ function v0At(lat, lon){
 }
 
 /**
- * Zona de carga (critério por faixas, como no Dlubal Geo-Zone Tool): limite superior da
- * faixa de 5 m/s em que o ponto está. Entre duas isopletas → a maior delas; além da última
- * curva no lado de maior V0 (ou dentro de curva fechada de pico) → próxima faixa (máx. 50).
+ * Zona de carga (critério por faixas): limite superior da faixa de 5 m/s entre as duas
+ * isopletas que delimitam o ponto. Além da última isopleta ou dentro de uma curva fechada
+ * de pico não há isopleta maior no mapa da NBR 6123 — vale o valor da própria curva
+ * (o Dlubal soma +5 m/s nesses casos; aqui não, por não haver respaldo na Figura 1).
  */
 function zoneAt(lat, lon, r){
   r = r || v0At(lat, lon);
-  if(r.B) return Math.max(r.A.v, r.B.v);
-  const higherSide = r.A.side!==0 && r.A.side===r.A.L.hi;
-  return higherSide ? Math.min(50, r.A.v+5) : r.A.v;
+  return r.B ? Math.max(r.A.v, r.B.v) : r.A.v;
 }
 
 
@@ -514,7 +516,7 @@ function setPoint(lat, lon, placeName){
     : (r.A.v===30 ? 'Região de V0 ≤ 30 m/s — adota-se 30 m/s' : `Além da isopleta ${r.A.v} m/s — adota-se ${r.A.v} m/s`);
   const zone = zoneAt(lat,lon,r);
   lastQuery={lat,lon,v,zone,r,explic,faixa,place:placeName||''};
-  for(const id of ['btnCargas','btnProfile','btnPrint','btnXls','btnPdf']) document.getElementById(id).disabled=false;
+  for(const id of ['btnVento','btnPrint','btnXls','btnPdf']) document.getElementById(id).disabled=false;
   out.innerHTML=`
     <div class="sub">Velocidade básica V0</div>
     <div class="v0"><span class="num">${fmt(v,round?1:2)}</span><span class="unit">m/s</span>
@@ -805,11 +807,13 @@ const FACE_NOME = { 0: 'face menor oeste (x = 0)', 180: 'face menor leste (x = a
          'iso1' isolada uma água · 'iso2' isolada duas águas · 'mar1' / 'mar2' marquise
    ============================================================ */
 function calc(ed) {
-  const a = Math.max(+ed.a, +ed.b), b = Math.min(+ed.a, +ed.b), h = +ed.h;
+  const predio = ed.tipo === 'predio', nPav = Math.max(1, Math.round(+ed.nPav || 1)), hPav = +ed.hPav || 3;
+  const a = Math.max(+ed.a, +ed.b), b = Math.min(+ed.a, +ed.b), h = predio ? nPav * hPav : +ed.h;
   const tg = (+ed.incl || 0) / 100, th = Math.atan(tg) / D2R_;
   const ab = a / b, hb = h / b;
   const tipo = ed.tipo, iso = /^(iso|mar)/.test(tipo);
-  const avisos = [], out = { geo: { a, b, h, tg, th, ab, hb }, avisos, casos: [], locais: [], tipo };
+  const avisos = [], out = { geo: { a, b, h, tg, th, ab, hb, nPav: predio ? nPav : null, hPav: predio ? hPav : null }, avisos, casos: [], locais: [], tipo };
+  if (predio) avisos.push(`Edificação de ${nPav} pavimentos × ${fmtN(hPav)} m: h = ${fmtN(h)} m. Paredes pela Tabela 6 com q variando com a altura (S2 no topo de cada pavimento); cobertura pela Tabela 7 com θ = ${fmtN(th)}°${th < 1e-6 ? ' (laje plana)' : ''}, q no topo.`);
   if (+ed.a < +ed.b) avisos.push('As dimensões foram reordenadas: a = maior dimensão (eixo da cumeeira/tramos), b = menor.');
 
   if (iso) return calcIsolada(ed, out);
@@ -842,7 +846,7 @@ function calc(ed) {
   const flipX = z => ({ ...z, x0: a - z.x1, x1: a - z.x0 }), flipY = z => ({ ...z, y0: b - z.y1, y1: b - z.y0 });
   let cob0 = [], cob90 = [], cob180 = null, cob270 = null, tabela = '', zTop = h;
 
-  if (tipo === 't7') {
+  if (tipo === 't7' || tipo === 'predio') {
     const t7 = tabela7(ab, hb, th); tabela = 'Tabela 7';
     if (t7.fora) avisos.push('h/b > 6: fora do campo da Tabela 7.');
     const x = Math.min(Math.max(b / 3, a / 4), 2 * h), xm = Math.max(x, Math.min(a / 2, a));
@@ -1107,13 +1111,22 @@ function rhoAdopted(){
   return RHO_NBR;
 }
 
-// Altitude do terreno (Open-Meteo, modelo digital Copernicus GLO-90)
+// Altitude do terreno: Open-Meteo (Copernicus GLO-90); se falhar, Open-Elevation (SRTM)
 async function fetchAltitude(q){
-  try{
-    const r=await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${q.lat.toFixed(5)}&longitude=${q.lon.toFixed(5)}`);
-    const j=await r.json(); const h=j && j.elevation && j.elevation[0];
-    if(Number.isFinite(h) && lastQuery===q){ q.alt=Math.round(h); updateDensityUI(); if(!pf('profModal').hidden) renderProfile(); }
-  }catch(e){ if(lastQuery===q){ q.alt=null; updateDensityUI(); } }
+  const la=q.lat.toFixed(5), lo=q.lon.toFixed(5);
+  const fontes=[
+    [`https://api.open-meteo.com/v1/elevation?latitude=${la}&longitude=${lo}`, j=>j && j.elevation && j.elevation[0], 'Copernicus GLO-90 (Open-Meteo)'],
+    [`https://api.open-elevation.com/api/v1/lookup?locations=${la},${lo}`, j=>j && j.results && j.results[0] && j.results[0].elevation, 'SRTM (Open-Elevation)'],
+  ];
+  for(const [url, pega, nome] of fontes){
+    try{
+      const ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(), 8000);
+      const r=await fetch(url,{signal:ctl.signal}); clearTimeout(tm);
+      const h=pega(await r.json());
+      if(Number.isFinite(h)){ if(lastQuery===q){ q.alt=Math.round(h); q.altFonte=nome; updateDensityUI(); if(!pf('profModal').hidden) renderProfile(); } return; }
+    }catch(e){}
+  }
+  if(lastQuery===q){ q.alt=null; updateDensityUI(); }
 }
 function updateDensityUI(){
   const q=lastQuery; if(!q) return;
@@ -1221,7 +1234,7 @@ pf('pfAlt').addEventListener('input',e=>{
 pf('profClose').onclick=()=>pf('profModal').hidden=true;
 pf('profModal').addEventListener('click',e=>{ if(e.target.id==='profModal') pf('profModal').hidden=true; });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') pf('profModal').hidden=true; });
-pf('btnProfile').onclick=openProfile;
+
 
 /* ============================================================
    MAPA ESTÁTICO (para o memorial) — tiles OSM + campo + isopletas
@@ -1349,7 +1362,7 @@ async function openMemorial(asPdf){
     <tr><td>Classe da edificação</td><td class="n">${prof.cls}</td><td>bm = ${fmt(S2_TAB[prof.cat][prof.cls][0],2)} · p = ${fmt(S2_TAB[prof.cat][prof.cls][1],3)} · Fr = ${fmt(FR[prof.cls],2)} · zg = ${S2_TAB[prof.cat].zg} m (Tabelas 1 e 2).</td></tr>
     <tr><td>Altura da estrutura h</td><td class="n">${fmt(P.h,2)} m</td><td>S2 = bm·Fr·(z/10)^p, constante abaixo de ${prof.cat==='V'?10:5} m (Tabela 3).</td></tr>
     <tr><td>Fator estatístico S3</td><td class="n">${fmt(P.s3,2)}</td><td>${S3_DESC[prof.s3]||''} (Tabela 4).</td></tr>
-    ${altEff()!=null?`<tr><td>Altitude do local</td><td class="n">${fmt(altEff(),0)} m</td><td>${q.altUser!=null?'Informada pelo usuário.':'Modelo digital de terreno Copernicus GLO-90 (Open-Meteo).'}</td></tr>`:''}
+    ${altEff()!=null?`<tr><td>Altitude do local</td><td class="n">${fmt(altEff(),0)} m</td><td>${q.altUser!=null?'Informada pelo usuário.':'Modelo digital de terreno '+(q.altFonte||'Copernicus GLO-90 (Open-Meteo)')+'.'}</td></tr>`:''}
     <tr><td>Densidade do ar ρ</td><td class="n">${fmt(P.rho,3)} kg/m³</td><td>${RHO_MODE_TXT[prof.rhoMode]}${prof.rhoMode==='alt'?': ρ = 1,226·(1 − 0,0065·h/288,15)^4,256':''}.
       q = ½·ρ·Vk²${Math.abs(P.rho-1.226)<1e-6?' = 0,613·Vk² (N/m²)':''}; em kgf/m²: q/9,80665.
       ${P.rho<RHO_NBR-1e-6?`<br><b>Atenção:</b> a NBR 6123 adota ρ = 1,226 kg/m³; a redução para ${fmt(P.rho,3)} kg/m³ diminui as pressões em ${fmt((1-P.rho/RHO_NBR)*100,1)} % e é critério do projetista.`:''}</td></tr>
@@ -1426,13 +1439,14 @@ pf('btnXls').onclick=async()=>{
    JANELA "CARGAS NA EDIFICAÇÃO" — usa CG (cargas.js) e o perfil de vento (q em kgf/m²)
    ============================================================ */
 const TIPOS_ED = {
+  predio: 'Edificação de múltiplos pavimentos (Tabelas 6 e 7)',
   t7: 'Galpão duas águas (Tabela 7)', t8: 'Galpão uma água (Tabela 8)', t9: 'Duas águas com calha central (Tabela 9)',
   arco: 'Galpão em arco — abóbada cilíndrica (Tabelas 15 a 20)',
   t10: 'Telhados múltiplos simétricos (Tabela 10)', t11: 'Múltiplos assimétricos, água a 60° (Tabela 11)', t12: 'Múltiplos com água vertical — shed (Tabela 12)',
   iso1: 'Cobertura isolada uma água (Tabela 24)', iso2: 'Cobertura isolada duas águas (Tabela 25)',
   mar1: 'Marquise uma água (Tabela 24)', mar2: 'Marquise duas águas (Tabela 25)',
 };
-const ED_DEFAULT = { tipo: 't7', a: 50, b: 30, h: 6, incl: 10, hp: 0.05, nVaos: 4, alto: 'S', l2: 10, calha: false, zRef: null, f: 6, metArco: 'T15',
+const ED_DEFAULT = { tipo: 't7', a: 50, b: 30, h: 6, incl: 10, hp: 0.05, nVaos: 4, alto: 'S', l2: 10, calha: false, zRef: null, f: 6, metArco: 'T15', nPav: 10, hPav: 3,
   cpi: { modo: 'quatro', par: '0-180', face: 0, r1: 1, altaSuccao: false, r2: 1, zona: 'q2', v0: -0.3, v90: -0.3, v180: -0.3, v270: -0.3 } };
 let ed = JSON.parse(JSON.stringify(ED_DEFAULT));
 try { const s = JSON.parse(localStorage.getItem('v0map.ed') || 'null'); if (s) { Object.assign(ed, s); ed.cpi = { ...ED_DEFAULT.cpi, ...(s.cpi || {}) }; } } catch (e) {}
@@ -1502,7 +1516,7 @@ function plantaSVG(caso, res, vmax) {
 function alturaCob(res, x, y) {
   const g = res.geo, { a, b, h, tg } = g;
   switch (res.tipo) {
-    case 't7': return h + tg * (b / 2 - Math.abs(y - b / 2));
+    case 't7': case 'predio': return h + tg * (b / 2 - Math.abs(y - b / 2));
     case 't8': return g.alto === 'N' ? h + tg * y : h + tg * (b - y);
     case 't9': return h - tg * (b / 2 - Math.abs(y - b / 2));
     case 'arco': { const f = g.f, R = (b * b / 4 + f * f) / (2 * f), yc = h + f - R; return yc + Math.sqrt(Math.max(0, R * R - (y - b / 2) ** 2)); }
@@ -1515,7 +1529,7 @@ function alturaCob(res, x, y) {
   }
   return h;
 }
-function corteSVG(caso, res, pmax) {
+function corteSVG(caso, res, pmax, floors) {
   const g = res.geo, { a, b } = g, d = caso.dir, ao = d === 0 || d === 180, L = ao ? a : b;
   const ysec = res.tipo === 't7' || res.tipo === 't9' || res.tipo === 't8' || res.tipo === 'arco' ? b / 4 : b / 2;
   const plan = s => d === 0 ? [s, ysec] : d === 180 ? [a - s, ysec] : d === 90 ? [a / 2, s] : [a / 2, b - s];
@@ -1528,9 +1542,12 @@ function corteSVG(caso, res, pmax) {
     pts.push([s, z]);
   }
   const zmax = Math.max(...pts.map(p => p[1]));
-  const W = 600, H = 300, mx = 70, myTop = 70, myBot = 34;
-  const sx = (W - 2 * mx) / L, sz = Math.max(sx, Math.min(4 * sx, (H - myTop - myBot) / zmax));
-  const X = s => mx + s * sx, Z = z => H - myBot - z * sz;
+  // escala: edificação alta → reduz as duas escalas para caber na altura (centralizada);
+  // edificação baixa e longa → amplia só a vertical (até 4×)
+  const W = 600, H = 300, mx = 92, myTop = 70, myBot = 34;
+  const sxF = (W - 2 * mx) / L, szF = (H - myTop - myBot) / zmax;
+  const sx = szF < sxF ? szF : sxF, sz = szF < sxF ? szF : Math.min(szF, 4 * sxF), x0 = (W - L * sx) / 2;
+  const X = s => x0 + s * sx, Z = z => H - myBot - z * sz;
   const fmt1 = v => fmt(v, 1);
   let o = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI,Arial,sans-serif" font-size="10.5">`;
   o += `<line x1="${X(0) - 30}" x2="${X(L) + 30}" y1="${Z(0)}" y2="${Z(0)}" stroke="#4a5462" stroke-width="1.2"/>`;
@@ -1572,7 +1589,17 @@ function corteSVG(caso, res, pmax) {
   }
   // paredes de barlavento e sotavento
   const ladoW = { 0: 'W', 180: 'E', 90: 'S', 270: 'N' }[d], ladoL = { W: 'E', E: 'W', S: 'N', N: 'S' }[ladoW];
-  for (const [lado, s, zt, nx] of [[ladoW, 0, zw0, -1], [ladoL, L, zw1, 1]]) {
+  if (floors) { // pressão variando com a altura: uma seta por pavimento (agrupa se forem muitos)
+    const passo = Math.max(1, Math.ceil(floors.length / 16));
+    for (const [k, s, zt, nx] of [['pW', 0, zw0, -1], ['pL', L, zw1, 1]]) {
+      for (let i = 0; i < floors.length; i += passo) { const fl = floors[Math.min(floors.length - 1, i + passo - 1)]; o += seta(X(s), Z((floors[i].z0 + fl.z1) / 2), nx, 0, fl[k]); }
+      const top = floors[floors.length - 1][k], bot = floors[0][k], id = caso.paredes.find(q => q.lado === (k === 'pW' ? ladoW : ladoL)).id;
+      o += `<text x="${X(s) + nx * 46}" y="${Z(zt) + 4}" text-anchor="middle" fill="#1b2430"><tspan font-weight="700">${id}</tspan> ${fmt1(top)}</text>`;
+      o += `<text x="${X(s) + nx * 46}" y="${Z(0) - 6}" text-anchor="middle" fill="#6b7685">${fmt1(bot)}</text>`;
+    }
+    for (const fl of floors) o += `<line x1="${X(0)}" x2="${X(L)}" y1="${Z(fl.z1)}" y2="${Z(fl.z1)}" stroke="#c9d1db" stroke-width="0.6"/>`;
+  }
+  else for (const [lado, s, zt, nx] of [[ladoW, 0, zw0, -1], [ladoL, L, zw1, 1]]) {
     const w = caso.paredes.find(q => q.lado === lado); if (!w) continue;
     const p = pNoc(w.p);
     for (let k = 1; k <= 3; k++) o += seta(X(s), Z(zt * k / 4), nx, 0, p);
@@ -1622,6 +1649,39 @@ function corteIsoSVG(res, q) {
   return out.join('');
 }
 
+/* --- edificação de múltiplos pavimentos: q por pavimento --- */
+function pavimentos(L) {
+  const { res, pr, P } = L, g = res.geo; if (!g.nPav) return null;
+  const pn = (ce, cpis, q) => { const ps = cpis.map(ci => q * (ce - ci)); return Math.abs(Math.min(...ps)) >= Math.abs(Math.max(...ps)) ? Math.min(...ps) : Math.max(...ps); };
+  const loc = pr.env.locais.find(l => l.grupo === 'paredes');
+  const rows = [];
+  for (let i = 1; i <= g.nPav; i++) {
+    const z = i * g.hPav, q = P.qz(z), r = { pav: i, z, s2: s2At(z, prof.cat, prof.cls), q };
+    for (const cs of pr.casos) {
+      const W = cs.paredes.find(w => w.id === 'C' || w.id === 'A'), Lw = cs.paredes.find(w => w.id === 'D' || w.id === 'B');
+      const lat = cs.paredes.find(w => /1\//.test(w.id));
+      r['W' + cs.dir] = pn(W.ce, cs.cpi, q); r['L' + cs.dir] = pn(Lw.ce, cs.cpi, q); r['S' + cs.dir] = pn(lat.ce, cs.cpi, q);
+    }
+    r.loc = loc && loc.cpe != null ? q * (loc.cpe - pr.env.cpiMax) : null;
+    rows.push(r);
+  }
+  return rows;
+}
+function pavimentosHTML(L, memorial) {
+  const rows = pavimentos(L); if (!rows) return '';
+  const f1 = v => v == null ? '—' : fmt(v, 1), cls = memorial ? ' class="n"' : '';
+  const W0 = L.pr.casos[0].paredes.find(w => w.id === 'C'), W90 = L.pr.casos[1].paredes.find(w => w.id === 'A');
+  let h = `<h3 class="cgh">Fachadas por pavimento — q no topo de cada pavimento (kgf/m², valor mais nocivo)</h3>
+  <table class="prof"><thead><tr><th>Pav.</th><th>z (m)</th><th>S2</th><th>q</th><th>0° barl. C</th><th>0° sotav. D</th><th>0° lateral A1</th><th>90° barl. A</th><th>90° sotav. B</th><th>90° lateral C1</th><th>Faixa local (cpe)</th></tr></thead><tbody>` +
+    rows.slice().reverse().map(r => `<tr><td${cls}>${r.pav}</td><td${cls}>${fmt(r.z, 2)}</td><td${cls}>${fmt(r.s2, 3)}</td><td${cls}><b>${f1(r.q)}</b></td><td${cls}>${f1(r.W0)}</td><td${cls}>${f1(r.L0)}</td><td${cls}>${f1(r.S0)}</td><td${cls}>${f1(r.W90)}</td><td${cls}>${f1(r.L90)}</td><td${cls}>${f1(r.S90)}</td><td${cls}>${f1(r.loc)}</td></tr>`).join('') +
+    `</tbody></table><p class="hint">Ce: barlavento ${fmt(W0.ce, 2)} (0°) / ${fmt(W90.ce, 2)} (90°), Tabela 6 com h = ${fmt(L.res.geo.h, 2)} m. S2 = bm·Fr·(z/10)^p (constante abaixo de 5 m; 10 m na Cat. V). A envoltória acima usa q no topo (a favor da segurança); esta tabela permite reduzir as pressões nos pavimentos inferiores.</p>`;
+  return h;
+}
+function floorsFor(L, caso) {
+  const rows = pavimentos(L); if (!rows) return null;
+  return rows.map(r => ({ z0: r.z - L.res.geo.hPav, z1: r.z, pW: r['W' + caso.dir], pL: r['L' + caso.dir] }));
+}
+
 /* --- interface --- */
 const cg = id => document.getElementById(id);
 function cgForm() {
@@ -1630,14 +1690,15 @@ function cgForm() {
   let h = `<label for="cgTipo">Tipo</label><select id="cgTipo">${Object.entries(TIPOS_ED).map(([k, v]) => `<option value="${k}"${k === t ? ' selected' : ''}>${v}</option>`).join('')}</select>`;
   h += f('cgA', iso ? 'Comprimento a (m)' : 'Comprimento a — maior (m)', ed.a, 'step="0.1" min="0.5"');
   h += f('cgB', iso ? 'Largura b (m)' : 'Largura b — menor (m)', ed.b, 'step="0.1" min="0.5"');
-  h += f('cgH', iso ? 'Altura livre h até a aresta mais baixa (m)' : 'Altura h até o beiral (m)', ed.h, 'step="0.1" min="0.5"');
+  if (t === 'predio') { h += f('cgNP', 'Nº de pavimentos', ed.nPav, 'step="1" min="1"'); h += f('cgHP', 'Pé-direito por pavimento (m)', ed.hPav, 'step="0.05" min="2"'); }
+  else h += f('cgH', iso ? 'Altura livre h até a aresta mais baixa (m)' : 'Altura h até o beiral (m)', ed.h, 'step="0.1" min="0.5"');
   if (t === 'arco') {
     h += f('cgF', 'Flecha do arco f (m)', ed.f, 'step="0.1" min="0.1"');
     h += `<label for="cgMet">Coeficientes</label><select id="cgMet">
       <option value="T15"${ed.metArco === 'T15' ? ' selected' : ''}>Tabelas 15–17 (baixa turbulência)</option>
       <option value="S1"${ed.metArco === 'S1' ? ' selected' : ''}>Tabelas 18–20, série S1 (Cat. I–II)</option>
       <option value="S2"${ed.metArco === 'S2' ? ' selected' : ''}>Tabelas 18–20, série S2 (Cat. III–IV)</option></select>`;
-  } else h += f('cgI', 'Inclinação i (%)', ed.incl, 'step="0.5" min="0"');
+  } else h += f('cgI', t === 'predio' ? 'Inclinação da cobertura i (%) — 0 = laje' : 'Inclinação i (%)', ed.incl, 'step="0.5" min="0"');
   if (t === 't8') h += `<label for="cgAlto">Beiral alto</label><select id="cgAlto"><option value="S"${ed.alto === 'S' ? ' selected' : ''}>Lado sul (y = 0)</option><option value="N"${ed.alto === 'N' ? ' selected' : ''}>Lado norte (y = b)</option></select>`;
   if (t === 't9') h += `<label for="cgHp">h'p / h</label><select id="cgHp"><option value="0.05"${+ed.hp <= 0.05 ? ' selected' : ''}>≤ 0,05</option><option value="0.15"${+ed.hp > 0.05 ? ' selected' : ''}>0,10 a 0,20</option></select>`;
   if (/^t1[012]$/.test(t)) h += f('cgN', 'Nº de tramos (vãos)', ed.nVaos, 'step="1" min="2"');
@@ -1666,7 +1727,7 @@ function cgForm() {
   cg('cgCpiBox').innerHTML = `<legend>Pressão interna (6.3.2)</legend><div class="frm">${k}</div>`; cg('cgCpiBox').hidden = iso;
   const bind = (id, fn) => { const el = cg(id); if (el) el.addEventListener('input', () => { fn(el.value); saveEd(); renderCargas(id === 'cgTipo' || id === 'cgCpi' || id === 'cgAS'); }); };
   const num = v => parseFloat(String(v).replace(',', '.'));
-  bind('cgTipo', v => { ed.tipo = v; ed.zRef = null; }); bind('cgA', v => ed.a = num(v)); bind('cgB', v => ed.b = num(v)); bind('cgH', v => ed.h = num(v));
+  bind('cgTipo', v => { ed.tipo = v; ed.zRef = null; }); bind('cgA', v => ed.a = num(v)); bind('cgB', v => ed.b = num(v)); bind('cgH', v => ed.h = num(v)); bind('cgNP', v => ed.nPav = num(v)); bind('cgHP', v => ed.hPav = num(v));
   bind('cgI', v => ed.incl = num(v)); bind('cgAlto', v => ed.alto = v); bind('cgHp', v => ed.hp = num(v)); bind('cgN', v => ed.nVaos = num(v));
   bind('cgL2', v => ed.l2 = num(v)); bind('cgF', v => ed.f = num(v)); bind('cgMet', v => ed.metArco = v); bind('cgCalha', v => ed.calha = v === '1'); bind('cgZ', v => ed.zRef = v === '' ? null : num(v));
   bind('cgCpi', v => c.modo = v); bind('cgPar', v => c.par = v); bind('cgFace', v => c.face = +v); bind('cgR1', v => c.r1 = num(v));
@@ -1676,7 +1737,7 @@ function cgForm() {
 function renderCargas(rebuildForm) {
   if (!lastQuery) return;
   if (rebuildForm) cgForm();
-  const ok = ed.a > 0 && ed.b > 0 && ed.h > 0 && ed.incl >= 0;
+  const ok = ed.a > 0 && ed.b > 0 && (ed.tipo === 'predio' ? ed.nPav >= 1 && ed.hPav > 0 : ed.h > 0) && (ed.incl >= 0 || ed.tipo === 'arco');
   if (!ok) { cg('cgOut').innerHTML = '<p class="hint">Informe a, b, h e a inclinação.</p>'; return; }
   const L = cargasCalc(), { res, pr, q, zRef } = L, f1 = v => v == null ? '—' : fmt(v, 1);
   cg('cgTh').textContent = res.tipo === 'arco' ? `f/b = ${fmt(res.geo.f / res.geo.b, 3)} · h/b = ${fmt(res.geo.hb, 3)}` : `θ = ${fmt(res.geo.th, 2)}°`;
@@ -1701,12 +1762,13 @@ function renderCargas(rebuildForm) {
   h += `<div class="cgtabs">${dirs.map(d => `<button data-d="${d}" class="${d === cgDir ? 'primary' : ''}">Vento ${d}°</button>`).join('')}
     ${res.simetrico ? '<span class="hint">(180° e 270° espelhados)</span>' : ''}</div>`;
   const caso = pr.casos.find(c => c.dir === cgDir);
-  h += `<div class="cgdia">${plantaSVG(caso, res, vmax)}</div><div class="cgdia" style="margin-top:8px">${corteSVG(caso, res, vmax)}</div>`;
+  h += `<div class="cgdia">${plantaSVG(caso, res, vmax)}</div><div class="cgdia" style="margin-top:8px">${corteSVG(caso, res, vmax, floorsFor(L, caso))}</div>`;
   h += `<p class="hint">cpi neste caso: ${caso.cpi.map(v => fmt(v, 2)).join(' ou ')} — ${escapeHtml(res.cpiTxt)} Cores: azul = sucção, vermelho = sobrepressão (valor mais nocivo).</p>`;
   const linhas = (arr, grupo) => arr.map(z => `<tr><td style="text-align:left">${grupo}</td><td style="text-align:left"><b>${z.id}</b> — ${escapeHtml(z.nome)}</td><td>${fmt(z.ce, 2)}</td><td>${f1(z.p.min)}</td><td>${f1(z.p.max)}</td></tr>`).join('');
   h += `<table class="prof"><thead><tr><th style="text-align:left">Elemento</th><th style="text-align:left">Zona</th><th>Ce</th><th>p mín (kgf/m²)</th><th>p máx (kgf/m²)</th></tr></thead><tbody>` +
     linhas(caso.paredes.filter((z, i, s) => s.findIndex(o => o.id === z.id) === i), 'Paredes') + linhas(caso.cobertura.filter((z, i, s) => s.findIndex(o => o.id === z.id) === i), 'Cobertura') + '</tbody></table>';
   h += envoltoriaHTML(L);
+  h += pavimentosHTML(L, false);
   cg('cgOut').innerHTML = h;
   cg('cgOut').querySelectorAll('.cgtabs button').forEach(bt => bt.onclick = () => { cgDir = +bt.dataset.d; renderCargas(false); });
 }
@@ -1721,11 +1783,22 @@ function envoltoriaHTML(L) {
     `</tbody></table><p class="hint">Zonas de alta sucção combinadas com o maior cpi (${fmt(e.cpiMax, 2)}). Valores para os elementos de vedação e suas fixações junto às bordas; os coeficientes gerais (Ce) valem para a estrutura principal.</p>`;
   void res; return h;
 }
-cg('btnCargas').onclick = () => { cg('cargasModal').hidden = false; renderCargas(true); };
+/* --- janela única "Vento": abas 1 · Perfil de vento / 2 · Cargas na edificação --- */
+const vTabs = ativa => `<div class="vtabs">${['1 · Perfil de vento', '2 · Cargas na edificação'].map((txt, i) => `<button type="button" class="vt${i === ativa ? ' on' : ''}" data-t="${i}">${txt}</button>`).join('')}</div>`;
+for (const [id, i] of [['profTitle', 0], ['cgTitle', 1]]) { const h2 = cg(id); h2.insertAdjacentHTML('beforebegin', vTabs(i)); h2.hidden = true; }
+cg('profModal').querySelector('.dlg').insertAdjacentHTML('beforeend', `<footer class="vnav"><span class="hint">Etapa 1 de 2 — V0 adotado, rugosidade, classe, altura, S1, S3 e densidade do ar.</span><button type="button" class="primary" data-go="1">Avançar: cargas na edificação →</button></footer>`);
+cg('cargasModal').querySelector('.dlg').insertAdjacentHTML('beforeend', `<footer class="vnav"><button type="button" data-go="0">← Voltar: perfil de vento</button><span class="hint">Etapa 2 de 2 — os parâmetros de vento vêm da etapa 1.</span></footer>`);
+function openVento(tab) {
+  if (tab === 0) { cg('cargasModal').hidden = true; openProfile(); }
+  else { cg('profModal').hidden = true; cg('cargasModal').hidden = false; renderCargas(true); }
+}
+document.querySelectorAll('#profModal [data-t], #profModal [data-go], #cargasModal [data-t], #cargasModal [data-go]')
+  .forEach(bt => bt.onclick = () => openVento(+(bt.dataset.t ?? bt.dataset.go)));
+cg('btnVento').onclick = () => openVento(0);
 cg('cgClose').onclick = () => cg('cargasModal').hidden = true;
 cg('cargasModal').addEventListener('click', e => { if (e.target.id === 'cargasModal') cg('cargasModal').hidden = true; });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') cg('cargasModal').hidden = true; });
-cg('cgPerfil').onclick = () => { cg('cargasModal').hidden = true; openProfile(); };
+cg('cgPerfil').onclick = () => openVento(0);
 
 /* --- conteúdo do memorial e do Excel --- */
 function cargasMemorialHTML() {
@@ -1747,13 +1820,14 @@ function cargasMemorialHTML() {
   }
   const vmax = Math.max(...pr.casos.flatMap(c => [...c.paredes, ...c.cobertura].flatMap(z => [Math.abs(z.p.min), Math.abs(z.p.max)])));
   const dirs = res.simetrico ? [0, 90] : [0, 90, 180, 270];
-  h += `<div class="charts">${dirs.map(d => `<div><h3>Vento ${d}° — planta, p (kgf/m², valor mais nocivo)</h3>${plantaSVG(pr.casos.find(c => c.dir === d), res, vmax)}</div><div><h3>Vento ${d}° — corte</h3>${corteSVG(pr.casos.find(c => c.dir === d), res, vmax)}</div>`).join('')}</div>`;
+  h += `<div class="charts">${dirs.map(d => `<div><h3>Vento ${d}° — planta, p (kgf/m², valor mais nocivo)</h3>${plantaSVG(pr.casos.find(c => c.dir === d), res, vmax)}</div><div><h3>Vento ${d}° — corte</h3>${corteSVG(pr.casos.find(c => c.dir === d), res, vmax, floorsFor(L, pr.casos.find(c => c.dir === d)))}</div>`).join('')}</div>`;
   for (const d of dirs) {
     const c = pr.casos.find(x => x.dir === d), uniq = arr => arr.filter((z, i, s) => s.findIndex(o => o.id === z.id) === i);
     h += `<table style="margin-top:8px"><tr><th colspan="5">Vento ${d}° — cpi ${c.cpi.map(v => fmt(v, 2)).join(' ou ')}</th></tr><tr><th>Elemento / zona</th><th class="n">Ce</th><th class="n">p mín</th><th class="n">p máx</th></tr>` +
       [...uniq(c.paredes).map(z => ['Parede', z]), ...uniq(c.cobertura).map(z => ['Cobertura', z])].map(([g, z]) =>
         `<tr><td>${g} — <b>${z.id}</b> ${escapeHtml(z.nome)}</td><td class="n">${fmt(z.ce, 2)}</td><td class="n">${f1(z.p.min)}</td><td class="n">${f1(z.p.max)}</td></tr>`).join('') + '</table>';
   }
+  h += pavimentosHTML(L, true);
   const e = pr.env, o = (x, nm) => `<tr><td>${nm}</td><td class="n"><b>${x ? f1(x.v) : '—'}</b></td><td>${x ? `zona ${x.id}, vento ${x.dir}°` : 'não ocorre'}</td></tr>`;
   h += `<h3 style="margin-top:12px">Envoltória para dimensionamento (kgf/m²)</h3><table>${o(e.paredes.pos, 'Fechamento lateral — sobrepressão')}${o(e.paredes.neg, 'Fechamento lateral — sucção')}${o(e.cobertura.pos, 'Cobertura — sobrepressão')}${o(e.cobertura.neg, 'Cobertura — sucção')}</table>`;
   h += `<table style="margin-top:8px"><tr><th>Zonas de alta sucção (vedações e fixações)</th><th class="n">cpe médio</th><th class="n">p (kgf/m²)</th></tr>` +
@@ -1770,6 +1844,13 @@ function cargasXlsxRows() {
     arr.filter((z, i, s) => s.findIndex(o => o.id === z.id) === i).forEach(z => rows.push([c.dir, g, z.id, z.nome, z.ce, c.cpi.join(' ou '), +z.p.min.toFixed(2), +z.p.max.toFixed(2)]));
   rows.push([], ['Zonas de alta sucção', 'cpe médio', 'p (kgf/m²)']);
   pr.env.locais.forEach(l => rows.push([(l.grupo === 'paredes' ? 'Paredes — ' : 'Cobertura — ') + l.nome, l.cpe, l.pNeg == null ? '' : +l.pNeg.toFixed(2)]));
+  const pav = pavimentos(L);
+  if (pav) {
+    const r2 = v => v == null ? '' : +v.toFixed(2);
+    rows.push([], ['Fachadas por pavimento (q no topo de cada pavimento, valor mais nocivo, kgf/m²)'],
+      ['Pav.', 'z (m)', 'S2', 'q', '0° barl. C', '0° sotav. D', '0° lateral A1', '90° barl. A', '90° sotav. B', '90° lateral C1', 'Faixa local (cpe)']);
+    pav.forEach(r => rows.push([r.pav, r2(r.z), +r.s2.toFixed(4), r2(r.q), r2(r.W0), r2(r.L0), r2(r.S0), r2(r.W90), r2(r.L90), r2(r.S90), r2(r.loc)]));
+  }
   return rows;
 }
 
