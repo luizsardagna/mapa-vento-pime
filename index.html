@@ -87,6 +87,23 @@ button:hover{filter:brightness(.96)}
 .cgenv b{display:block;font-size:18px;font-variant-numeric:tabular-nums}
 .cgenv span{font-size:11px;color:var(--muted)}
 .cargas .dlg{width:min(1240px,100%)}
+.cgplans{display:grid;grid-template-columns:1fr;gap:8px}
+.cg2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media (max-width:900px){.cg2{grid-template-columns:1fr}}
+.abcard{border:1px solid var(--line);border-radius:8px;padding:6px;margin-top:6px;display:flex;flex-direction:column;gap:5px}
+.abcard .abr{display:flex;gap:6px;align-items:flex-end}
+.abcard input,.abcard select{font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink);min-width:0;width:100%}
+.abcard .abr>input{flex:1}
+.abcard label{flex:1;font-size:11.5px;color:var(--muted);display:flex;flex-direction:column;gap:2px;margin:0}
+.abcard label.abop{flex-direction:row;align-items:center;gap:4px;white-space:nowrap}
+.abcard label.abop input{width:auto}
+.abcard button{padding:4px 8px}
+.prof.det td{padding:3px 4px}
+.prof.det input,.prof.det select{font:inherit;padding:3px 5px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink)}
+.cgcons{margin-top:14px;border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:12.5px}
+.cgcons summary{cursor:pointer;font-weight:600}
+.cgcons ol{margin:8px 0 2px;padding-left:20px}
+.cgcons li{margin:4px 0}
 @media (max-width:900px){.cgenv{grid-template-columns:repeat(2,1fr)}}
 .tools button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 4px;font-size:11.5px}
 .tools button .ic{font-size:17px;line-height:1}
@@ -200,6 +217,7 @@ table.prof th{color:var(--muted);font-weight:600}
         <fieldset><legend>Geometria <span class="hint" id="cgTh"></span></legend><div class="frm" id="cgGeo"></div>
           <div class="hint">Planta: a ao longo do eixo x (cumeeira / tramos), b ao longo de y. Vento 0° sopra ao longo de a; 90° atinge a face maior (lado sul, y = 0).</div></fieldset>
         <fieldset id="cgCpiBox"></fieldset>
+        <fieldset id="cgEstBox"></fieldset>
         <fieldset><legend>Vento</legend><div class="hint">V0, S1, S2 (categoria e classe), S3 e ρ vêm da janela <b>Perfil de vento</b>; q é calculado na altura de referência.</div>
           <button id="cgPerfil" style="margin-top:8px">🌬️ Ajustar perfil de vento</button></fieldset>
       </div>
@@ -611,23 +629,12 @@ const CG = (() => {
 const r3 = x => x == null ? null : Math.round(x * 1000) / 1000;
 const D2R_ = Math.PI / 180;
 
-// Interpolação linear em tabela com possíveis células vazias (null): entre dois valores
-// tabelados interpola; com só um dos vizinhos definido, adota esse valor (aprox = true).
-function interp(xs, ys, x) {
-  if (x <= xs[0]) return { v: ys[0], aprox: false };
-  const n = xs.length;
-  if (x >= xs[n - 1]) return { v: ys[n - 1], aprox: false };
-  for (let i = 0; i < n - 1; i++) {
-    if (x >= xs[i] && x <= xs[i + 1]) {
-      const y0 = ys[i], y1 = ys[i + 1];
-      if (y0 != null && y1 != null) return { v: r3(y0 + (y1 - y0) * (x - xs[i]) / (xs[i + 1] - xs[i])), aprox: false };
-      if (y0 == null && y1 == null) return { v: null, aprox: false };
-      return { v: y0 != null ? y0 : y1, aprox: true };
-    }
-  }
-  return { v: ys[n - 1], aprox: false };
-}
-const iv = (xs, ys, x) => interp(xs, ys, x).v;
+// Regra adotada onde a norma NÃO manda interpolar (θ, f/ℓ, h/ℓ, a/b da Tabela 9, proporções de
+// abertura do cpi): usa-se a linha tabelada imediatamente acima do valor real (linhas como faixas
+// "até x"); acima da última linha, a última. Célula vazia na linha adotada = valor não definido.
+function acima(xs, x) { const i = xs.findIndex(v => v >= x - 1e-9); return i < 0 ? xs.length - 1 : i; }
+const iv = (xs, ys, x) => ys[acima(xs, x)];
+const linha = (xs, x) => xs[acima(xs, x)];   // valor tabelado adotado (para o memorial)
 const lerpAB = (v1, v2, t) => r3(v1 + (v2 - v1) * t);
 const tAB = (ab, lo, hi) => ab <= lo ? 0 : ab >= hi ? 1 : (ab - lo) / (hi - lo);
 
@@ -676,8 +683,8 @@ function tabela7(ab, hb, th) {
   const bd = bandaHB(T7, hb), g = k => iv(bd.th, bd[k], th);
   const FH = g('FH');
   const loc = {}; let aprox = false;
-  for (const k of ['c1', 'c2', 'c3', 'c4']) { const r = interp(bd.th, bd[k], th); loc[k] = r.v; aprox = aprox || r.aprox; }
-  return { EFI: g('EFI'), GHJ: g('GHJ'), EG: g('EG'), FH, IJ: lerpAB(FH, -0.2, tAB(ab, 1, 2)), loc, locAprox: aprox,
+  for (const k of ['c1', 'c2', 'c3', 'c4']) loc[k] = iv(bd.th, bd[k], th);
+  return { EFI: g('EFI'), GHJ: g('GHJ'), EG: g('EG'), FH, IJ: lerpAB(FH, -0.2, tAB(ab, 1, 2)), loc, thTab: linha(bd.th, th),
     banda: bd.label, fora: hb > 6 + 1e-9 };
 }
 
@@ -695,27 +702,21 @@ function tabela8(ab, hb, th) {
   const g = k => iv(T8.th, T8[k], Math.max(th, 5));
   const v = {};
   for (const k of ['p90_HI', 'p90_LJ', 'm90_HI', 'm90_LJ', 'z_near', 'z_far', 'H1', 'H2', 'L1', 'L2', 'He', 'Le']) v[k] = g(k);
-  let nota2 = false;
-  if (th < 5) { // Nota 2: para θ = 0° usar a Tabela 7 (conforme h/b) — interpola-se entre 0° e 5°
-    nota2 = true;
-    const t7 = tabela7(ab, hb, 0), t = th / 5, L = (k, v0) => { v[k] = lerpAB(v0, v[k], t); };
-    L('p90_HI', t7.EFI); L('p90_LJ', t7.GHJ); L('m90_LJ', t7.EFI); L('m90_HI', t7.GHJ);
-    L('z_near', t7.EG); L('z_far', t7.FH);
-    for (const k of ['H1', 'H2', 'L1', 'L2', 'He', 'Le']) L(k, -2.0);
-  }
+  const nota2 = false; // θ < 5°: adota-se a linha de 5° (a Nota 2 só trata de θ = 0°)
   // Nota 1: partes I e J com vento 0° — a/b = 1: igual a H e L; a/b ≥ 2: −0,2
   v.z_IJ = lerpAB(v.z_near, -0.2, tAB(ab, 1, 2));
-  return { ...v, nota2, fora: hb >= 2 };
+  return { ...v, nota2, fora: hb >= 2, thTab: linha(T8.th, Math.max(th, 5)) };
 }
 
 /* ---------- Tabela 9 — duas águas, calha central (h/b = 0,5) ---------- */
 const T9 = { ab1: { p05: { EF: -0.6, GH: -0.2, EG: -0.7, FH: -0.1 }, p1020: { EF: -0.7, GH: -0.4, EG: -0.7, FH: -0.3 } },
              ab2: { p05: { EF: -0.8, GH: -0.3, EG: -0.4, FH: 0.2 }, p1020: { EF: -0.8, GH: -0.5, EG: -0.5, FH: 0.2 } } };
 function tabela9(ab, hb, hp, th) {
-  const f = hp <= 0.05 ? 'p05' : 'p1020', t = tAB(ab, 1, 2), v = {};
-  for (const k of ['EF', 'GH', 'EG', 'FH']) v[k] = lerpAB(T9.ab1[f][k], T9.ab2[f][k], t);
+  const f = hp <= 0.05 ? 'p05' : 'p1020', abt = ab <= 1 + 1e-9 ? 'ab1' : 'ab2', v = {};
+  for (const k of ['EF', 'GH', 'EG', 'FH']) v[k] = T9[abt][f][k];
+  v.abTab = abt === 'ab1' ? 1 : 2;
   // cpe médio — valores gráficos da Tabela 9: adota-se o mais severo da borda para a/b e θ do caso
-  const ab2 = ab >= 1.5, th15 = th >= 12.5;
+  const ab2 = ab > 1 + 1e-9, th15 = th > 10 + 1e-9;   // linha imediatamente acima (a/b: 1 | 2; θ: 10° | 15°)
   v.locBorda = ab2 ? -1.8 : (th15 ? -1.2 : -1.4);
   return { ...v, fora: Math.abs(hb - 0.5) > 0.15 };
 }
@@ -760,18 +761,14 @@ const T20 = { f5: { h: [1 / 4, 1 / 2], E: [-1.6, -2.4], F: [null, -1.2] }, f10: 
               S2: { E: -1.5, G: -1.8, H: -1.5 } };
 // interpolação em h/ℓ dentro de cada flecha e depois em f/ℓ entre 1/10 e 1/5 (limitado aos extremos)
 function arcoRow(tab, fr, hr, n) {
-  const row = t => Array.from({ length: n }, (_, i) => iv(t.h, t.p.map(r => r[i]), hr));
-  const t = tAB(fr, 0.1, 0.2), r10 = row(tab.f10), r5 = row(tab.f5);
-  return r10.map((v, i) => lerpAB(v, r5[i], t));
+  const t = fr <= 0.1 + 1e-9 ? tab.f10 : tab.f5;
+  return Array.from({ length: n }, (_, i) => iv(t.h, t.p.map(r => r[i]), hr));
 }
 function arco(met, fr, hr) {
   if (met === 'S2') return { perp: T18.S2.slice(), par: T19.S2.slice(), loc: { ...T20.S2 } };
   if (met === 'S1') {
-    const t = tAB(fr, 0.1, 0.2);
-    const E = lerpAB(iv(T20.f10.h, T20.f10.E, hr), iv(T20.f5.h, T20.f5.E, hr), t);
-    const F10 = iv(T20.f10.h, T20.f10.F, hr), F5 = iv(T20.f5.h, T20.f5.F, hr);   // F não tabelado para f/b = 1/5, h/b = 1/4
-    return { perp: arcoRow(T18, fr, hr, 6), par: arcoRow(T19, fr, hr, 4),
-      loc: { E, F: F5 == null ? F10 : lerpAB(F10, F5, t) } };
+    const t20 = fr <= 0.1 + 1e-9 ? T20.f10 : T20.f5;   // F não tabelado para f/b = 1/5, h/b = 1/4 ("—")
+    return { perp: arcoRow(T18, fr, hr, 6), par: arcoRow(T19, fr, hr, 4), loc: { E: iv(t20.h, t20.E, hr), F: iv(t20.h, t20.F, hr) } };
   }
   return { perp: arcoRow(T15, fr, hr, 6), par: [-0.8, -0.6, -0.3, -0.2], loc: { AD1: -1.8 } };
 }
@@ -820,6 +817,7 @@ function calc(ed) {
 
   // ---------- paredes (Tabela 6) ----------
   const t6 = tabela6(ab, hb);
+  if (ed.altaTurb) { t6.D = r3(t6.D * 2 / 3); t6.B = r3(t6.B * 2 / 3); avisos.push('Vento de alta turbulência (6.1.3.1): Ce da parede de sotavento tomado como 2/3 do valor da Tabela 6 — válido só para h ≤ 80 m, profundidade/largura > 1/3 e vizinhança a barlavento com altura média ≥ metade da altura da edificação.'); }
   if (t6.fora) avisos.push('h/b > 6: fora do campo da Tabela 6 — valores da última faixa (verificar estudo específico).');
   const L1 = Math.min(Math.max(b / 3, a / 4), 2 * h);           // faixa A1/B1 (vento 0°)
   const Lc1 = Math.min(2 * h, b / 2);                           // faixa C1/D1 (vento 90°)
@@ -859,13 +857,14 @@ function calc(ed) {
     const nomes = { c1: `Faixas junto às empenas (largura y = ${fmtN(y)} m)`, c2: `Faixas de beiral junto aos cantos (y × x = ${fmtN(y)} × ${fmtN(x)} m)`,
       c3: 'Faixas de beiral entre os cantos', c4: `Faixa da cumeeira (y = ${fmtN(y)} m de cada lado)` };
     for (const k of ['c1', 'c2', 'c3', 'c4']) out.locais.push({ grupo: 'cobertura', id: k, nome: nomes[k], cpe: t7.loc[k], ref: 'Tabela 7' });
-    if (t7.locAprox) avisos.push('Algum cpe médio da cobertura foi tomado do θ tabelado vizinho (célula vazia na Tabela 7 para o θ exato).');
+    if (Math.abs(t7.thTab - th) > 1e-6) avisos.push(`θ = ${fmtN(th)}° → adotada a linha θ = ${t7.thTab}° da Tabela 7 (sem interpolação em θ).`);
+    if (Object.values(t7.loc).some(v => v == null)) avisos.push('Faixas sem cpe médio na Tabela 7 para a linha adotada (célula vazia): não há zona de alta sucção definida pela norma para elas.');
     void xm;
   }
   else if (tipo === 't8') {
     const t8 = tabela8(ab, hb, th); tabela = 'Tabela 8';
     if (t8.fora) avisos.push('h/b ≥ 2: fora do campo da Tabela 8 (válida para h/b < 2).');
-    if (t8.nota2) avisos.push('θ < 5°: valores interpolados entre a Tabela 7 (θ = 0°, Nota 2 da Tabela 8) e a Tabela 8 (θ = 5°).');
+    if (Math.abs(t8.thTab - th) > 1e-6 && th <= 30) avisos.push(`θ = ${fmtN(th)}° → adotada a linha θ = ${t8.thTab}° da Tabela 8 (sem interpolação em θ).`);
     if (th > 30) avisos.push('θ > 30°: fora do campo da Tabela 8 — adotados os valores de 30°.');
     const altoS = (ed.alto || 'S') === 'S';           // beiral alto no lado y = 0 (sul) ou y = b (norte)
     const hiHalf = altoS ? [0, b / 2] : [b / 2, b], loHalf = altoS ? [b / 2, b] : [0, b / 2];
@@ -886,7 +885,7 @@ function calc(ed) {
   else if (tipo === 't9') {
     const t9 = tabela9(ab, hb, +ed.hp || 0.05, th); tabela = 'Tabela 9';
     if (t9.fora) avisos.push('A Tabela 9 foi ensaiada para h/b = 0,5 — aplicar com cautela para h/b = ' + fmtN(hb, 2) + '.');
-    if (ab > 2) avisos.push('a/b > 2: a Tabela 9 cobre a/b = 1 a 2 — adotados os valores de a/b = 2.');
+    avisos.push(`a/b = ${fmtN(ab)} → adotada a linha a/b = ${t9.abTab} da Tabela 9 (a norma não indica interpolação).`);
     cob90 = [R(0, a, 0, b / 2, 'E/F', t9.EF, 'Água de barlavento (E e F)'), R(0, a, b / 2, b, 'G/H', t9.GH, 'Água de sotavento (G e H)')];
     cob0 = [R(0, a / 2, 0, b, 'E/G', t9.EG, 'Metade de barlavento (E e G)'), R(a / 2, a, 0, b, 'F/H', t9.FH, 'Metade de sotavento (F e H)')];
     zTop = h;
@@ -896,8 +895,10 @@ function calc(ed) {
     const f = Math.max(0.01, +ed.f || b / 5), met = ed.metArco || 'T15', fr = f / b, hr = h / b, A = arco(met, fr, hr);
     tabela = met === 'T15' ? 'Tabelas 15 a 17' : 'Tabelas 18 a 20 (série ' + met + ')';
     out.geo.f = f; out.geo.metArco = met; zTop = h + f;
+    const fTab = fr <= 0.1 + 1e-9 ? '1/10' : '1/5', hTab = met === 'S2' ? null : (met === 'T15' ? (fr <= 0.1 + 1e-9 ? T15.f10.h : T15.f5.h) : [0.25, 0.5]);
+    if (met !== 'S2') avisos.push(`f/ℓ = ${fmtN(fr, 3)} → linha f/ℓ = ${fTab}; h/ℓ = ${fmtN(hr, 3)} → linha h/ℓ = ${fmtN(linha(hTab, hr), 3)} (sem interpolação; linha imediatamente acima).`);
     if (met === 'T15') {
-      if (fr < 0.1 - 1e-9 || fr > 0.2 + 1e-9) avisos.push('f/ℓ2 fora de 1/10 a 1/5: adotados os valores extremos da Tabela 15.');
+      if (fr < 0.1 - 1e-9 || fr > 0.2 + 1e-9) avisos.push('f/ℓ2 fora de 1/10 a 1/5: adotada a linha extrema da Tabela 15.');
       if (fr < 0.15 && hr < 1 / 8) avisos.push('Para f/ℓ2 = 1/10 a Tabela 15 começa em h/ℓ2 = 1/8: adotados os valores de 1/8.');
       if (a < 0.5 * b || a > 3 * b) avisos.push('Tabelas 15 a 17 ensaiadas para 0,5·ℓ2 < ℓ1 < 3·ℓ2 (ℓ1 = comprimento, ℓ2 = vão): fora da faixa.');
       avisos.push('Tabelas 15 a 17: ensaios em escoamento de baixa turbulência — a norma os considera orientação para o projeto (6.2.3).');
@@ -923,8 +924,8 @@ function calc(ed) {
     const n = Math.max(2, Math.round(+ed.nVaos || 2)), ap = a / n, m = multiplo(tipo, th);
     tabela = { t10: 'Tabela 10', t11: 'Tabela 11', t12: 'Tabela 12' }[tipo];
     if (h > ap + 1e-9 && tipo !== 't12') avisos.push(`h > a' (${fmtN(ap)} m): fora do campo da ${tabela} (h ≤ a').`);
-    if (tipo === 't10' && (th < 5 || th > 45)) avisos.push('θ fora de 5° a 45°: adotados os valores extremos da Tabela 10.');
-    if (tipo === 't12' && (th < 10 || th > 30)) avisos.push('θ fora de 10° a 30°: adotados os valores extremos da Tabela 12.');
+    if (tipo === 't10') { if (th > 45) avisos.push('θ > 45°: fora da Tabela 10 — adotada a linha de 45°.'); else if (Math.abs(linha(T10.th, th) - th) > 1e-6) avisos.push(`θ = ${fmtN(th)}° → adotada a linha θ = ${linha(T10.th, th)}° da Tabela 10 (sem interpolação em θ).`); }
+    if (tipo === 't12') { if (th > 30) avisos.push('θ > 30°: fora da Tabela 12 — adotada a linha de 30°.'); else if (Math.abs(linha(T12.th, th) - th) > 1e-6) avisos.push(`θ = ${fmtN(th)}° → adotada a linha θ = ${linha(T12.th, th)}° da Tabela 12 (sem interpolação em θ).`); }
     if (tipo === 't11') avisos.push('Tabela 11: água menor inclinada a 60° (θ não entra no cálculo).');
     // 1ª água de cada tramo (a*, c*, m*, x*): inclinada a θ (T10), a 60° (T11) ou face vertical (T12);
     // fração da projeção em planta só para o desenho
@@ -955,9 +956,11 @@ function calc(ed) {
   out.geo.zTop = zTop; out.tabela = tabela; out.geo.alto = ed.alto || 'S';
 
   // ---------- Cpi ----------
-  const cpi = calcCpi(ed.cpi || { modo: 'quatro' }, { t6, L1, Lc1, a, b }, avisos);
-  out.cpiTxt = cpi.txt;
   const ventos = [[0, paredes0(0), cob0], [90, paredes90(90), cob90], [180, paredes0(180), cob180], [270, paredes90(270), cob270]];
+  const roofArea = tipo === 'arco' ? a * (() => { const f = out.geo.f, R = (b * b / 4 + f * f) / (2 * f); return 2 * R * Math.asin(b / (2 * R)); })() : a * b / Math.cos(Math.atan(tg));
+  const geoCpi = { t6, L1, Lc1, a, b, h, zTop, roofArea, zonas: Object.fromEntries(ventos.map(([d, p, cb]) => [d, { paredes: p, cobertura: cb }])) };
+  const cpi = calcCpi(ed.cpi || { modo: 'quatro' }, geoCpi, avisos);
+  out.cpiTxt = cpi.txt; out.cpiDet = cpi.det || null;
   for (const [dir, par, cob] of ventos) out.casos.push({ dir, paredes: par, cobertura: cob, cpi: cpi.porDir[dir] });
   out.simetrico = !(tipo === 't8' || tipo === 't11' || tipo === 't12' || tipo === 'arco' && false || cpi.assimetrico);
   return out;
@@ -992,12 +995,78 @@ function calcCpi(c, g, avisos) {
     }
     txt = `Abertura dominante na ${FACE_NOME[F]} — 6.3.2.1 c): barlavento (proporção ${fmtN(r1, 2)}) → ${fmtN(porDir[F][0], 2)}; sotavento → Ce da face; ` +
       (c.altaSuccao ? `face paralela em zona de alta sucção (proporção ${fmtN(r2, 2)}) → ${fmtN(pares(CPI_SUCC, r2), 2)}.` : 'face paralela → Ce da zona da abertura (Tabela 6).');
+  } else if (m === 'detalhado') {
+    const det = cpiDetalhado(c, g);
+    for (const d of D) porDir[d] = det.porDir[d];
+    assim = true;
+    txt = `Método detalhado (6.3.3): equilíbrio de vazões Σ ±Aj·√|Ce*j − cpi| = 0 resolvido por aproximações sucessivas para ${det.nCasos} combinação(ões) de aberturas operáveis, com permeabilidade de fundo de ${fmtN(+c.fundo || 0, 2)} % ${c.forroPerm !== false ? '(cobertura permeável, sem forro estanque)' : '(forro estanque: cobertura fora do cálculo)'}; adota-se o cpi mais desfavorável (máximo e mínimo) em cada direção.`;
+    return { porDir, txt, assimetrico: assim, det };
   } else { // usuário
     for (const d of D) { const v = c['v' + d]; porDir[d] = [Number.isFinite(+v) && v !== '' ? +v : 0]; }
     txt = 'Coeficientes de pressão interna informados pelo usuário.';
     assim = new Set(D.map(d => porDir[d][0])).size > 1;
   }
   return { porDir, txt, assimetrico: assim };
+}
+
+/* ---------- cpi pelo método detalhado (6.3.3) ----------
+   Cada abertura j (área Aj) recebe o coeficiente externo Ce*j da zona em que se situa (média ponderada
+   pela área quando distribuída). cpi resolve Σ Aj·sinal(Ce*j − cpi)·√|Ce*j − cpi| = 0 (função decrescente
+   de cpi → bissecção entre o menor e o maior Ce*). Aberturas operáveis geram todas as combinações. */
+function cpiDetalhado(c, g) {
+  const { a, b, h, zTop, roofArea, zonas } = g, fundo = Math.max(0, +c.fundo || 0) / 100, forro = c.forroPerm !== false;
+  const ab = (c.aberturas || []).filter(o => +o.area > 0).slice(0, 12);
+  const oper = ab.filter(o => o.oper), fixas = ab.filter(o => !o.oper);
+  const faceLen = { S: a, N: a, W: b, E: b }, faceArea = { S: a * h, N: a * h, W: b * h + b * (zTop - h) / 2, E: b * h + b * (zTop - h) / 2 };
+  // lista de [área, Ce*] para uma abertura numa direção
+  const parcelas = (o, d) => {
+    const z = zonas[d], A = +o.area, out = [];
+    if ('SNWE'.includes(o.face)) {
+      const segs = z.paredes.filter(w => w.lado === o.face);
+      const x = o.x === '' || o.x == null || !Number.isFinite(+o.x) ? null : +o.x;
+      if (x != null) { const s = segs.find(w => x >= w.x0 - 1e-6 && x <= w.x1 + 1e-6) || segs[0]; out.push([A, s.ce]); }
+      else for (const w of segs) out.push([A * (w.x1 - w.x0) / faceLen[o.face], w.ce]);
+    } else {
+      const reg = o.face === 'C1' ? [0, a, 0, b / 2] : o.face === 'C2' ? [0, a, b / 2, b] : o.face === 'LT' ? null : [0, a, 0, b];
+      const regs = reg ? [[reg, 1]] : [[[0, a, b / 2 - 0.01 * b, b / 2], 0.5], [[0, a, b / 2, b / 2 + 0.01 * b], 0.5]];
+      for (const [[x0, x1, y0, y1], w] of regs) {
+        const ra = (x1 - x0) * (y1 - y0);
+        for (const zc of z.cobertura) {
+          const ox = Math.max(0, Math.min(x1, zc.x1) - Math.max(x0, zc.x0)), oy = Math.max(0, Math.min(y1, zc.y1) - Math.max(y0, zc.y0));
+          if (ox * oy > 0) out.push([A * w * ox * oy / ra, zc.ce]);
+        }
+      }
+    }
+    return out;
+  };
+  const resolve = lista => {
+    const f = ci => lista.reduce((s, [A, ce]) => s + A * Math.sign(ce - ci) * Math.sqrt(Math.abs(ce - ci)), 0);
+    let lo = Math.min(...lista.map(p => p[1])), hi = Math.max(...lista.map(p => p[1]));
+    if (hi - lo < 1e-9) return lo;
+    for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (f(m) > 0) lo = m; else hi = m; }
+    return (lo + hi) / 2;
+  };
+  const porDir = {}, casos = {}, nC = 1 << oper.length;
+  for (const d of [0, 90, 180, 270]) {
+    const base = [];
+    if (fundo > 0) {
+      for (const F of 'SNWE') base.push(...parcelas({ face: F, area: fundo * faceArea[F] }, d));
+      if (forro) base.push(...parcelas({ face: 'CT', area: fundo * roofArea }, d));
+    }
+    for (const o of fixas) if (forro || 'SNWE'.includes(o.face)) base.push(...parcelas(o, d));
+    const vals = [];
+    for (let k = 0; k < nC; k++) {
+      const lista = base.slice(), abertas = [];
+      oper.forEach((o, i) => { if (k >> i & 1) { if (forro || 'SNWE'.includes(o.face)) lista.push(...parcelas(o, d)); abertas.push(o.nome || o.face); } });
+      if (!lista.length) continue;
+      const ci = Math.round(resolve(lista) * 100) / 100;
+      vals.push({ cpi: ci, abertas: abertas.length ? abertas.join(' + ') : 'só fixas / fundo' });
+    }
+    casos[d] = vals;
+    const cs = vals.map(v => v.cpi);
+    porDir[d] = cs.length ? [...new Set([Math.min(...cs), Math.max(...cs)])] : [0];
+  }
+  return { porDir, casos, nCasos: nC };
 }
 
 function calcIsolada(ed, out) {
@@ -1015,9 +1084,13 @@ function calcIsolada(ed, out) {
     if (tg < 0.07 - 1e-9 || tg > 0.6 + 1e-9) out.avisos.push('tg θ fora de 0,07 a 0,6: fora do campo da Tabela 25 — adotados os limites.');
     out.tabela = 'Tabela 25'; out.iso = { duas: true, t25: tabela25(tg), calha: !!ed.calha };
   }
-  out.geo.zTop = h + (duas ? l2 / 2 : l2) * tg;
+  // topo: maior entre o topo da cobertura e o topo das abas (testeiras), que começam na aresta baixa
+  out.geo.zTop = Math.max(h + (duas ? l2 / 2 : l2) * tg, h + Math.max(0, +ed.aba || 0));
   out.locais.push({ grupo: 'cobertura', id: 'ved', nome: 'Elementos de vedação (telhas e fixações) — 7.2.6', cpe: -2.0, cpePos: 2.0, ref: '7.2.6' });
-  out.iso.FtCoef = 0.5; // 7.2.2 (texto da edição 2023): Ft = 0,5·q·a·b
+  // 7.2.2: a edição 2023 imprime 0,5; a de 1988 (8.2.5) usava 0,05, coerente com 6.1.5 e com as abas (0,05).
+  // Adota-se 0,05 (erro de impressão — mesma conclusão do manual CBCA, Pravia & Vanin, 2026, nota da seção 2.2.3.10).
+  out.iso.FtCoef = 0.05;
+  out.geo.aba = Math.max(0, +ed.aba || 0);   // altura das abas (testeiras), 7.2.5
   return out;
 }
 
@@ -1026,7 +1099,8 @@ function fmtN(n, d = 2) { return n == null || !Number.isFinite(n) ? '—' : n.to
 /* ---------- Pressões (q em kgf/m²) e envoltória ---------- */
 // Para cada zona e direção: p = q·(Ce − cpi), com todos os cpi candidatos (o mais nocivo é
 // a maior sobrepressão e a maior sucção). Cobertura isolada: p = q·cp (sem cpi).
-function pressoes(res, q) {
+// qv: pressão dinâmica para vedações e fixações (S2 da Classe A e, se adotado, 0,92·S3) — 6.1.1 / Tabela 4
+function pressoes(res, q, qv = q) {
   const env = { paredes: { pos: null, neg: null }, cobertura: { pos: null, neg: null }, locais: [] };
   const upd = (o, v, ref) => { if (v > 0 && (!o.pos || v > o.pos.v)) o.pos = { v, ...ref }; if (v < 0 && (!o.neg || v < o.neg.v)) o.neg = { v, ...ref }; };
   if (res.iso) {
@@ -1043,8 +1117,14 @@ function pressoes(res, q) {
       add(nm, 'Carregamento 1', 'pb', 'Água de barlavento', t.c1.pb); add(nm, 'Carregamento 1', 'ps', 'Água de sotavento', t.c1.ps);
       add(nm, 'Carregamento 2', 'pb', 'Água de barlavento', t.c2.pb); add(nm, 'Carregamento 2', 'ps', 'Água de sotavento', t.c2.ps);
     }
-    env.locais = res.locais.map(l => ({ ...l, pNeg: q * l.cpe, pPos: q * (l.cpePos || 0) }));
-    return { rows, env, Ft: res.iso.FtCoef * q * res.geo.a * res.geo.l2 };
+    env.locais = res.locais.map(l => ({ ...l, pNeg: qv * l.cpe, pPos: qv * (l.cpePos || 0) }));
+    // abas (testeiras), 7.2.5: perpendiculares ao vento F = 1,3·q·Ae (barlavento) e 0,8·q·Ae (sotavento); paralelas Ft = 0,05·q·Ae
+    const ha = res.geo.aba, A = res.geo.a, L2 = res.geo.l2;
+    const abas = ha > 0 ? {
+      perp: { barl: 1.3 * q * A * ha, sot: 0.8 * q * A * ha, par: 0.05 * q * L2 * ha },   // vento perpendicular à geratriz
+      para: { barl: 1.3 * q * L2 * ha, sot: 0.8 * q * L2 * ha, par: 0.05 * q * A * ha },   // vento paralelo à geratriz
+    } : null;
+    return { rows, env, Ft: res.iso.FtCoef * q * A * L2, abas };
   }
   const casos = res.casos.map(c => {
     const cpis = c.cpi, f = ce => { const ps = cpis.map(ci => q * (ce - ci)); return { max: Math.max(...ps), min: Math.min(...ps) }; };
@@ -1054,7 +1134,8 @@ function pressoes(res, q) {
   });
   // Locais (cpe médio): sucção externa máxima combinada com o maior cpi entre as direções
   const cpiMax = Math.max(...res.casos.flatMap(c => c.cpi)), cpiMin = Math.min(...res.casos.flatMap(c => c.cpi));
-  env.locais = res.locais.map(l => ({ ...l, pNeg: l.cpe == null ? null : q * (l.cpe - cpiMax) }));
+  env.locais = res.locais.map(l => ({ ...l, pNeg: l.cpe == null ? null : qv * (l.cpe - cpiMax) }));
+  env.qv = qv;
   env.cpiMax = cpiMax; env.cpiMin = cpiMin;
   return { casos, env };
 }
@@ -1324,7 +1405,7 @@ async function openMemorial(asPdf){
     .maps figure{margin:0}.maps img{width:100%;border:1px solid #c9d1db;border-radius:4px}figcaption{font-size:10.5px;color:#5c6878;margin-top:3px}
     .big{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:6px 0}.big div{border:1px solid #c9d1db;border-radius:6px;padding:6px 9px}
     .big b{display:block;font-size:17px}.big span{font-size:10.5px;color:#5c6878}.charts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-    .charts div{border:1px solid #dde3ea;border-radius:6px;padding:4px 8px}.charts h3{font-size:11.5px;margin:2px 0}.charts svg{width:100%;height:auto}
+    .charts div{border:1px solid #dde3ea;border-radius:6px;padding:4px 8px}.charts h3{font-size:11.5px;margin:2px 0}.charts svg{width:100%;height:auto}.charts.charts1{grid-template-columns:1fr}.charts1 svg{max-width:150mm;display:block;margin:0 auto}
     .note{font-size:10.5px;color:#5c6878;margin-top:12px}.resp{margin-top:16px;border:1px solid #c9d1db;border-left:4px solid #1f66a8;border-radius:4px;padding:8px 10px;font-size:10.5px}
     .sign{display:grid;grid-template-columns:2fr 1fr 1fr;gap:16px;margin-top:34px}.sign div{border-top:1px solid #1b2430;padding-top:3px;font-size:10.5px;color:#5c6878}
     h2{color:#1f66a8!important;border-bottom-color:#1f66a8!important}.hdr{border-bottom-color:#1f66a8!important}.pdfhint{background:#fff6e0;color:#7a5200;padding:8px 12px;border-radius:6px;margin-bottom:10px}
@@ -1446,7 +1527,7 @@ const TIPOS_ED = {
   iso1: 'Cobertura isolada uma água (Tabela 24)', iso2: 'Cobertura isolada duas águas (Tabela 25)',
   mar1: 'Marquise uma água (Tabela 24)', mar2: 'Marquise duas águas (Tabela 25)',
 };
-const ED_DEFAULT = { tipo: 't7', a: 50, b: 30, h: 6, incl: 10, hp: 0.05, nVaos: 4, alto: 'S', l2: 10, calha: false, zRef: null, f: 6, metArco: 'T15', nPav: 10, hPav: 3,
+const ED_DEFAULT = { tipo: 't7', a: 50, b: 30, h: 6, incl: 10, hp: 0.05, nVaos: 4, alto: 'S', l2: 10, calha: false, zRef: null, f: 6, metArco: 'T15', nPav: 10, hPav: 3, aba: 0, ved092: false, eport: 5, ctTelhado: 0.04, ctParedes: 0.04, altaTurb: false, vizinhanca: false, pil1: '', pil2: '',
   cpi: { modo: 'quatro', par: '0-180', face: 0, r1: 1, altaSuccao: false, r2: 1, zona: 'q2', v0: -0.3, v90: -0.3, v180: -0.3, v270: -0.3 } };
 let ed = JSON.parse(JSON.stringify(ED_DEFAULT));
 try { const s = JSON.parse(localStorage.getItem('v0map.ed') || 'null'); if (s) { Object.assign(ed, s); ed.cpi = { ...ED_DEFAULT.cpi, ...(s.cpi || {}) }; } } catch (e) {}
@@ -1457,10 +1538,14 @@ const isIso = t => /^(iso|mar)/.test(t);
 // q (kgf/m²) na altura de referência, com os parâmetros do perfil de vento
 function cargasCalc() {
   const res = CG.calc(ed);
-  const zRef = ed.zRef > 0 ? +ed.zRef : res.geo.zTop;
+  const zRef = res.geo.zTop;   // pior caso: q na maior altura, para cobertura e fechamento
+  // o perfil de vento (aba 1 e memorial) passa a usar a mesma altura total da edificação
+  if (Math.abs((+prof.h || 0) - zRef) > 0.005) { prof.h = Math.round(zRef * 100) / 100; saveProf(); }
   const P = profileCalc(), q = P.qz(zRef);
-  const pr = CG.pressoes(res, q);
-  return lastCargas = { res, pr, q, zRef, P, vk: P.vk(zRef) };
+  const rho = rhoAdopted(), vkV = P.v0 * P.s1 * s2At(zRef, prof.cat, 'A') * P.s3 * (ed.ved092 ? 0.92 : 1);
+  const qv = 0.5 * rho * vkV * vkV / G_KGF;   // vedações e fixações: Classe A (6.1.1) e, se marcado, 0,92·S3 (Tabela 4)
+  const pr = CG.pressoes(res, q, qv);
+  return lastCargas = { res, pr, q, qv, vkV, zRef, P, vk: P.vk(zRef) };
 }
 
 /* --- diagrama em planta (SVG) --- */
@@ -1511,6 +1596,7 @@ function plantaSVG(caso, res, vmax) {
 }
 
 
+const FIG = { press: '#6b6b6b', succ: '#b4432a', fill: '#f3ede4', linha: '#262626', txt: '#262626', vento: '#2f5fa8', serif: "Georgia,'Times New Roman',serif" };
 /* --- corte da edificação com as cargas (setas normais à superfície, comprimento ∝ |p|) --- */
 // Altura da cobertura no ponto (x, y) da planta, conforme o tipo
 function alturaCob(res, x, y) {
@@ -1529,7 +1615,8 @@ function alturaCob(res, x, y) {
   }
   return h;
 }
-function corteSVG(caso, res, pmax, floors) {
+function corteSVG(caso, res, pmax, floors, opts = {}) {
+  const dec = opts.dec ?? 1, unid = opts.unid || 'p em kgf/m²';
   const g = res.geo, { a, b } = g, d = caso.dir, ao = d === 0 || d === 180, L = ao ? a : b;
   const ysec = res.tipo === 't7' || res.tipo === 't9' || res.tipo === 't8' || res.tipo === 'arco' ? b / 4 : b / 2;
   const plan = s => d === 0 ? [s, ysec] : d === 180 ? [a - s, ysec] : d === 90 ? [a / 2, s] : [a / 2, b - s];
@@ -1544,19 +1631,21 @@ function corteSVG(caso, res, pmax, floors) {
   const zmax = Math.max(...pts.map(p => p[1]));
   // escala: edificação alta → reduz as duas escalas para caber na altura (centralizada);
   // edificação baixa e longa → amplia só a vertical (até 4×)
-  const W = 600, H = 300, mx = 92, myTop = 70, myBot = 34;
+  let W = 600, H = opts.titulo ? 326 : 300; const mx = 92, myTop = opts.titulo ? 96 : 70, myBot = 34;
   const sxF = (W - 2 * mx) / L, szF = (H - myTop - myBot) / zmax;
   const sx = szF < sxF ? szF : sxF, sz = szF < sxF ? szF : Math.min(szF, 4 * sxF), x0 = (W - L * sx) / 2;
+  H = Math.min(H, Math.round(myTop + myBot + zmax * sz + 12));
   const X = s => x0 + s * sx, Z = z => H - myBot - z * sz;
-  const fmt1 = v => fmt(v, 1);
-  let o = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI,Arial,sans-serif" font-size="10.5">`;
+  const fmt1 = v => (v > 0 ? '+' : '') + fmt(v, dec);
+  let o = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="${FIG.serif}" font-size="11">`;
+  if (opts.titulo) o += `<text x="${W / 2}" y="16" text-anchor="middle" font-size="13" fill="${FIG.txt}">${opts.titulo}</text>`;
   o += `<line x1="${X(0) - 30}" x2="${X(L) + 30}" y1="${Z(0)}" y2="${Z(0)}" stroke="#4a5462" stroke-width="1.2"/>`;
   for (let k = 0; k < 14; k++) o += `<line x1="${X(0) - 30 + k * (X(L) - X(0) + 60) / 14}" x2="${X(0) - 38 + k * (X(L) - X(0) + 60) / 14}" y1="${Z(0)}" y2="${Z(0) + 6}" stroke="#8a94a3"/>`;
   const zw0 = pts[0][1], zw1 = pts[pts.length - 1][1];
-  o += `<polyline fill="#f4f6f9" stroke="#1b2430" stroke-width="2" points="${X(0)},${Z(0)} ${pts.map(p => X(p[0]) + ',' + Z(p[1])).join(' ')} ${X(L)},${Z(0)}"/>`;
+  o += `<polyline fill="${FIG.fill}" stroke="${FIG.linha}" stroke-width="2.4" points="${X(0)},${Z(0)} ${pts.map(p => X(p[0]) + ',' + Z(p[1])).join(' ')} ${X(L)},${Z(0)}"/>`;
   const zoneAt = (x, y) => caso.cobertura.find(z => x >= z.x0 - 1e-6 && x <= z.x1 + 1e-6 && y >= z.y0 - 1e-6 && y <= z.y1 + 1e-6);
   const seta = (x, y, nx, ny, p) => { // (x, y) na superfície (px), normal para fora (nx, ny)
-    const len = 8 + 36 * Math.min(1, Math.abs(p) / (pmax || 1)), col = p < 0 ? '#2b6cc4' : '#d64c32';
+    const len = 8 + 36 * Math.min(1, Math.abs(p) / (pmax || 1)), col = p < 0 ? FIG.succ : FIG.press;
     const [x0, y0, x1, y1] = p < 0 ? [x, y, x + nx * len, y + ny * len] : [x + nx * len, y + ny * len, x, y];
     const ux = (x1 - x0) / len, uy = (y1 - y0) / len;
     return `<line x1="${x0}" y1="${y0}" x2="${x1 - ux * 5}" y2="${y1 - uy * 5}" stroke="${col}" stroke-width="1.6"/><path d="M${x1},${y1} L${x1 - ux * 7 - uy * 3.5},${y1 - uy * 7 + ux * 3.5} L${x1 - ux * 7 + uy * 3.5},${y1 - uy * 7 - ux * 3.5} Z" fill="${col}"/>`;
@@ -1585,53 +1674,55 @@ function corteSVG(caso, res, pmax, floors) {
   for (const r of runs) {
     const sm = (r.s0 + r.s1) / 2, yl = Z(r.zmax) - 8 - 40 * Math.min(1, Math.abs(r.p) / (pmax || 1)) - 6;
     if (X(r.s1) - X(r.s0) < 14 && runs.length > 10) continue;
-    o += `<text x="${X(sm)}" y="${Math.max(12, yl)}" text-anchor="middle" fill="#1b2430"><tspan font-weight="700">${r.id}</tspan> ${fmt1(r.p)}</text>`;
+    o += `<text x="${X(sm)}" y="${Math.max(opts.titulo ? 30 : 12, yl)}" text-anchor="middle" fill="${FIG.txt}">${opts.semId ? '' : `<tspan font-style="italic">${r.id}</tspan> `}${fmt1(r.p)}</text>`;
   }
   // paredes de barlavento e sotavento
   const ladoW = { 0: 'W', 180: 'E', 90: 'S', 270: 'N' }[d], ladoL = { W: 'E', E: 'W', S: 'N', N: 'S' }[ladoW];
   if (floors) { // pressão variando com a altura: uma seta por pavimento (agrupa se forem muitos)
     const passo = Math.max(1, Math.ceil(floors.length / 16));
     for (const [k, s, zt, nx] of [['pW', 0, zw0, -1], ['pL', L, zw1, 1]]) {
-      for (let i = 0; i < floors.length; i += passo) { const fl = floors[Math.min(floors.length - 1, i + passo - 1)]; o += seta(X(s), Z((floors[i].z0 + fl.z1) / 2), nx, 0, fl[k]); }
-      const top = floors[floors.length - 1][k], bot = floors[0][k], id = caso.paredes.find(q => q.lado === (k === 'pW' ? ladoW : ladoL)).id;
+      const vis = floors.filter(fl => fl.z0 < zt - 1e-6);
+      for (let i = 0; i < vis.length; i += passo) { const fl = vis[Math.min(vis.length - 1, i + passo - 1)], z0 = vis[i].z0, z1 = Math.min(fl.z1, zt); o += seta(X(s), Z((z0 + z1) / 2), nx, 0, fl[k]); }
+      for (const fl of vis) if (fl.z1 < zt - 1e-6) o += `<line x1="${X(s)}" x2="${X(s) + nx * 10}" y1="${Z(fl.z1)}" y2="${Z(fl.z1)}" stroke="#8a94a3" stroke-width="1"/>`;
+      const top = vis[vis.length - 1][k], bot = vis[0][k], id = caso.paredes.find(q => q.lado === (k === 'pW' ? ladoW : ladoL)).id;
       o += `<text x="${X(s) + nx * 46}" y="${Z(zt) + 4}" text-anchor="middle" fill="#1b2430"><tspan font-weight="700">${id}</tspan> ${fmt1(top)}</text>`;
       o += `<text x="${X(s) + nx * 46}" y="${Z(0) - 6}" text-anchor="middle" fill="#6b7685">${fmt1(bot)}</text>`;
     }
-    for (const fl of floors) o += `<line x1="${X(0)}" x2="${X(L)}" y1="${Z(fl.z1)}" y2="${Z(fl.z1)}" stroke="#c9d1db" stroke-width="0.6"/>`;
   }
   else for (const [lado, s, zt, nx] of [[ladoW, 0, zw0, -1], [ladoL, L, zw1, 1]]) {
     const w = caso.paredes.find(q => q.lado === lado); if (!w) continue;
     const p = pNoc(w.p);
     for (let k = 1; k <= 3; k++) o += seta(X(s), Z(zt * k / 4), nx, 0, p);
-    o += `<text x="${X(s) + nx * 40}" y="${Z(zt / 2) - 26}" text-anchor="middle" fill="#1b2430"><tspan font-weight="700">${w.id}</tspan> ${fmt1(p)}</text>`;
+    o += `<text x="${X(s) + nx * 40}" y="${Z(zt / 2) - 26}" text-anchor="middle" fill="${FIG.txt}">${opts.semId ? '' : `<tspan font-style="italic">${w.id}</tspan> `}${fmt1(p)}</text>`;
   }
-  o += `<g transform="translate(${X(0) - 50} ${Z(zw0) - 34})"><line x1="-16" x2="12" y1="0" y2="0" stroke="#e0218a" stroke-width="3"/><path d="M12,-6 L22,0 L12,6 Z" fill="#e0218a"/></g>`;
-  o += `<text x="${X(0) - 46}" y="${Z(zw0) - 44}" text-anchor="middle" font-weight="700" fill="#e0218a">${d}°</text>`;
-  o += `<text x="${X(L)}" y="${H - 8}" text-anchor="end" fill="#6b7685">Corte ${ao ? 'longitudinal (ao longo de a)' : 'transversal (ao longo de b)'} · p em kgf/m²${sz > sx * 1.01 ? ' · escala vertical ampliada' : ''}</text>`;
+  if (opts.foraDoPlano) o += `<g transform="translate(${Math.max(36, X(0) - 74)} ${Z(zw0 * 0.25)})"><circle r="9" fill="none" stroke="${FIG.vento}" stroke-width="2"/><path d="M-6,-6 L6,6 M6,-6 L-6,6" stroke="${FIG.vento}" stroke-width="2"/></g><text x="${Math.max(36, X(0) - 74)}" y="${Z(zw0 * 0.25) + 24}" text-anchor="middle" font-size="10" fill="${FIG.vento}">vento ⊥ plano</text>`;
+  else { o += `<g transform="translate(${X(0) - 70} ${Z(zw0 * 0.25)})"><line x1="-14" x2="5" y1="0" y2="0" stroke="${FIG.vento}" stroke-width="3"/><path d="M5,-6 L15,0 L5,6 Z" fill="${FIG.vento}"/></g>`;
+    o += `<text x="${X(0) - 68}" y="${Z(zw0 * 0.25) - 12}" text-anchor="middle" font-size="10.5" fill="${FIG.vento}">${opts.rotVento || 'vento ' + d + '°'}</text>`; }
+  o += `<text x="${W - 8}" y="${H - 8}" text-anchor="end" font-size="10" fill="#6b6b6b"><tspan fill="${FIG.press}">➜</tspan> para dentro  <tspan fill="${FIG.succ}">➜</tspan> para fora · ${opts.rodape || ('Corte ' + (ao ? 'longitudinal (ao longo de a)' : 'transversal (ao longo de b)'))} · ${unid}${sz > sx * 1.01 ? ' · escala vertical ampliada' : ''}</text>`;
   return o + '</svg>';
 }
 // Coberturas isoladas: um corte por carregamento, com o sentido das ações indicado na Tabela 24/25
 function corteIsoSVG(res, q) {
-  const g = res.geo, W = 600, H = 150, out = [];
+  const g = res.geo, W = 600, H = 172, out = [];
   const draw = (titulo, perfil, cps, sentidoPos) => { // perfil: [[s,z]...] (0..1), cps: [cp no início, cp no fim] por água
-    let o = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI,Arial,sans-serif" font-size="10.5">`;
-    const X = s => 90 + s * 420, Z = z => 112 - z * 50;
-    o += `<line x1="70" x2="530" y1="${Z(-0.6)}" y2="${Z(-0.6)}" stroke="#8a94a3"/>`;
-    for (const [s] of [perfil[0], perfil[perfil.length - 1]]) o += `<line x1="${X(s)}" x2="${X(s)}" y1="${Z(-0.6)}" y2="${Z(perfil.find(p => p[0] === s)[1])}" stroke="#8a94a3" stroke-width="3"/>`;
-    o += `<polyline fill="none" stroke="#1b2430" stroke-width="2.5" points="${perfil.map(p => X(p[0]) + ',' + Z(p[1])).join(' ')}"/>`;
+    let o = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="${FIG.serif}" font-size="11.5">`;
+    const X = s => 90 + s * 420, Z = z => 126 - z * 50;
+    o += `<line x1="70" x2="530" y1="${Z(-0.6)}" y2="${Z(-0.6)}" stroke="#6b6b6b"/>`;
+    for (const [s] of [perfil[0], perfil[perfil.length - 1]]) o += `<line x1="${X(s)}" x2="${X(s)}" y1="${Z(-0.6)}" y2="${Z(perfil.find(p => p[0] === s)[1])}" stroke="${FIG.linha}" stroke-width="3"/>`;
+    o += `<polyline fill="none" stroke="${FIG.linha}" stroke-width="2.8" points="${perfil.map(p => X(p[0]) + ',' + Z(p[1])).join(' ')}"/>`;
     const pm = Math.max(...cps.flat().map(Math.abs), 0.1);
     for (let w = 0; w < perfil.length - 1; w++) {
       const [sA, zA] = perfil[w], [sB, zB] = perfil[w + 1], [cA, cB] = cps[w];
       for (let k = 0; k <= 4; k++) {
         const t = (k + 0.5) / 5.0, s = sA + (sB - sA) * t, z = zA + (zB - zA) * t, cp = cA + (cB - cA) * t;
-        const down = (cp > 0) === (sentidoPos === 'baixo'), len = 8 + 30 * Math.abs(cp) / pm, x = X(s), y = Z(z), col = down ? '#d64c32' : '#2b6cc4';
+        const down = (cp > 0) === (sentidoPos === 'baixo'), len = 8 + 30 * Math.abs(cp) / pm, x = X(s), y = Z(z), col = down ? FIG.press : FIG.succ;
         const [y0, y1] = down ? [y - len, y - 4] : [y - 2, y - len];
-        o += `<line x1="${x}" x2="${x}" y1="${y0}" y2="${y1}" stroke="${col}" stroke-width="1.6"/><path d="M${x},${y1 + (down ? 4 : -4)} l-3.5,${down ? -7 : 7} l7,0 Z" fill="${col}"/>`;
+        o += `<line x1="${x}" x2="${x}" y1="${y0}" y2="${y1}" stroke="${col}" stroke-width="2.4"/><path d="M${x},${y1 + (down ? 4 : -4)} l-4.5,${down ? -8 : 8} l9,0 Z" fill="${col}"/>`;
       }
-      o += `<text x="${X(sA) + 6}" y="${Z(zA) - 44}" fill="#1b2430">${fmt(cA * q, 1)}</text><text x="${X(sB) - 6}" y="${Z(zB) - 44}" text-anchor="end" fill="#1b2430">${fmt(cB * q, 1)}</text>`;
+      o += `<text x="${X(sA) + 6}" y="${Z(zA) - 46}" fill="${FIG.txt}">${fmt(cA * q, 1)}</text><text x="${X(sB) - 6}" y="${Z(zB) - 46}" text-anchor="end" fill="${FIG.txt}">${fmt(cB * q, 1)}</text>`;
     }
-    o += `<g transform="translate(40 ${Z(0.2)})"><line x1="-14" x2="12" y1="0" y2="0" stroke="#e0218a" stroke-width="3"/><path d="M12,-6 L22,0 L12,6 Z" fill="#e0218a"/></g>`;
-    o += `<text x="${W - 10}" y="14" text-anchor="end" font-weight="700" fill="#1b2430">${titulo}</text><text x="${W - 10}" y="${H - 6}" text-anchor="end" fill="#6b7685">p em kgf/m² · vermelho = para baixo, azul = para cima</text>`;
+    o += `<g transform="translate(44 ${Z(0.2)})"><line x1="-18" x2="10" y1="0" y2="0" stroke="${FIG.vento}" stroke-width="3"/><path d="M10,-6 L21,0 L10,6 Z" fill="${FIG.vento}"/></g><text x="44" y="${Z(0.2) - 12}" text-anchor="middle" font-size="10.5" fill="${FIG.vento}">vento</text>`;
+    o += `<text x="${W / 2}" y="16" text-anchor="middle" font-size="13" fill="${FIG.txt}">${titulo}</text><text x="${W - 8}" y="${H - 6}" text-anchor="end" font-size="10" fill="#6b6b6b">p em kgf/m² · <tspan fill="${FIG.press}">➜</tspan> para baixo  <tspan fill="${FIG.succ}">➜</tspan> para cima</text>`;
     out.push(o + '</svg>');
   };
   const i = res.iso;
@@ -1649,14 +1740,21 @@ function corteIsoSVG(res, q) {
   return out.join('');
 }
 
-/* --- edificação de múltiplos pavimentos: q por pavimento --- */
+/* --- fechamento por faixas de altura: q no topo de cada faixa --- */
+const Z_T3 = [5, 10, 15, 20, 30, 40, 50, 60, 80, 100, 120, 140, 160, 180, 200, 250, 300, 350, 400, 420, 450, 500];
+function faixasAltura(res) {
+  const g = res.geo;
+  if (g.nPav) return Array.from({ length: g.nPav }, (_, i) => ({ z0: i * g.hPav, z1: (i + 1) * g.hPav, rot: String(i + 1) }));
+  const top = g.zTop, ed = [0, ...Z_T3.filter(z => z < top - 1e-6), top];
+  return ed.slice(1).map((z1, i) => ({ z0: ed[i], z1, rot: i === 0 ? '0 – ' + fmt(z1, 2) : fmt(ed[i], 2) + ' – ' + fmt(z1, 2) }));
+}
 function pavimentos(L) {
-  const { res, pr, P } = L, g = res.geo; if (!g.nPav) return null;
+  const { res, pr, P } = L; if (res.iso) return null;
   const pn = (ce, cpis, q) => { const ps = cpis.map(ci => q * (ce - ci)); return Math.abs(Math.min(...ps)) >= Math.abs(Math.max(...ps)) ? Math.min(...ps) : Math.max(...ps); };
   const loc = pr.env.locais.find(l => l.grupo === 'paredes');
   const rows = [];
-  for (let i = 1; i <= g.nPav; i++) {
-    const z = i * g.hPav, q = P.qz(z), r = { pav: i, z, s2: s2At(z, prof.cat, prof.cls), q };
+  for (const fx of faixasAltura(res)) {
+    const z = fx.z1, q = P.qz(z), r = { pav: fx.rot, z0: fx.z0, z, s2: s2At(z, prof.cat, prof.cls), q };
     for (const cs of pr.casos) {
       const W = cs.paredes.find(w => w.id === 'C' || w.id === 'A'), Lw = cs.paredes.find(w => w.id === 'D' || w.id === 'B');
       const lat = cs.paredes.find(w => /1\//.test(w.id));
@@ -1671,15 +1769,16 @@ function pavimentosHTML(L, memorial) {
   const rows = pavimentos(L); if (!rows) return '';
   const f1 = v => v == null ? '—' : fmt(v, 1), cls = memorial ? ' class="n"' : '';
   const W0 = L.pr.casos[0].paredes.find(w => w.id === 'C'), W90 = L.pr.casos[1].paredes.find(w => w.id === 'A');
-  let h = `<h3 class="cgh">Fachadas por pavimento — q no topo de cada pavimento (kgf/m², valor mais nocivo)</h3>
-  <table class="prof"><thead><tr><th>Pav.</th><th>z (m)</th><th>S2</th><th>q</th><th>0° barl. C</th><th>0° sotav. D</th><th>0° lateral A1</th><th>90° barl. A</th><th>90° sotav. B</th><th>90° lateral C1</th><th>Faixa local (cpe)</th></tr></thead><tbody>` +
+  const ped = !!L.res.geo.nPav;
+  let h = `<h3 class="cgh">${ped ? 'Fachadas por pavimento' : 'Fechamento por faixa de altura (Tabela 3)'} — q no topo de cada faixa (kgf/m², valor mais nocivo)</h3>
+  <table class="prof"><thead><tr><th>${ped ? 'Pav.' : 'Faixa z (m)'}</th><th>z topo (m)</th><th>S2</th><th>q</th><th>0° barl. C</th><th>0° sotav. D</th><th>0° lateral A1</th><th>90° barl. A</th><th>90° sotav. B</th><th>90° lateral C1</th><th>Faixa local (cpe)</th></tr></thead><tbody>` +
     rows.slice().reverse().map(r => `<tr><td${cls}>${r.pav}</td><td${cls}>${fmt(r.z, 2)}</td><td${cls}>${fmt(r.s2, 3)}</td><td${cls}><b>${f1(r.q)}</b></td><td${cls}>${f1(r.W0)}</td><td${cls}>${f1(r.L0)}</td><td${cls}>${f1(r.S0)}</td><td${cls}>${f1(r.W90)}</td><td${cls}>${f1(r.L90)}</td><td${cls}>${f1(r.S90)}</td><td${cls}>${f1(r.loc)}</td></tr>`).join('') +
-    `</tbody></table><p class="hint">Ce: barlavento ${fmt(W0.ce, 2)} (0°) / ${fmt(W90.ce, 2)} (90°), Tabela 6 com h = ${fmt(L.res.geo.h, 2)} m. S2 = bm·Fr·(z/10)^p (constante abaixo de 5 m; 10 m na Cat. V). A envoltória acima usa q no topo (a favor da segurança); esta tabela permite reduzir as pressões nos pavimentos inferiores.</p>`;
+    `</tbody></table><p class="hint">Ce: barlavento ${fmt(W0.ce, 2)} (0°) / ${fmt(W90.ce, 2)} (90°), Tabela 6 com h = ${fmt(L.res.geo.h, 2)} m. S2 = bm·Fr·(z/10)^p (constante abaixo de 5 m; 10 m na Cat. V). Em planta, na cobertura e na envoltória adota-se o pior caso, q no topo (z = ${fmt(L.res.geo.zTop, 2)} m); estas faixas valem para o fechamento, como mostrado nos cortes.</p>`;
   return h;
 }
 function floorsFor(L, caso) {
   const rows = pavimentos(L); if (!rows) return null;
-  return rows.map(r => ({ z0: r.z - L.res.geo.hPav, z1: r.z, pW: r['W' + caso.dir], pL: r['L' + caso.dir] }));
+  return rows.map(r => ({ z0: r.z0, z1: r.z, pW: r['W' + caso.dir], pL: r['L' + caso.dir] }));
 }
 
 /* --- interface --- */
@@ -1702,9 +1801,9 @@ function cgForm() {
   if (t === 't8') h += `<label for="cgAlto">Beiral alto</label><select id="cgAlto"><option value="S"${ed.alto === 'S' ? ' selected' : ''}>Lado sul (y = 0)</option><option value="N"${ed.alto === 'N' ? ' selected' : ''}>Lado norte (y = b)</option></select>`;
   if (t === 't9') h += `<label for="cgHp">h'p / h</label><select id="cgHp"><option value="0.05"${+ed.hp <= 0.05 ? ' selected' : ''}>≤ 0,05</option><option value="0.15"${+ed.hp > 0.05 ? ' selected' : ''}>0,10 a 0,20</option></select>`;
   if (/^t1[012]$/.test(t)) h += f('cgN', 'Nº de tramos (vãos)', ed.nVaos, 'step="1" min="2"');
-  if (iso) h += f('cgL2', 'Profundidade ℓ2 (m)', ed.l2, 'step="0.1" min="0.5"');
+  if (iso) { h += f('cgL2', 'Profundidade ℓ2 (m)', ed.l2, 'step="0.1" min="0.5"'); h += f('cgAba', 'Altura das abas / testeiras (m) — 0 = sem', ed.aba, 'step="0.05" min="0"'); }
+  h += `<label for="cgV92">Vedações com 0,92·S3 (Nota da Tabela 4)</label><select id="cgV92"><option value="0"${!ed.ved092 ? ' selected' : ''}>Não (S3 integral)</option><option value="1"${ed.ved092 ? ' selected' : ''}>Sim</option></select>`;
   if (/2$/.test(t) && iso) h += `<label for="cgCalha">Forma</label><select id="cgCalha"><option value="0"${!ed.calha ? ' selected' : ''}>Cumeeira (Λ)</option><option value="1"${ed.calha ? ' selected' : ''}>Calha central (V)</option></select>`;
-  h += f('cgZ', 'Altura de referência p/ q (m)', ed.zRef ?? '', 'step="0.1" min="0.5" placeholder="automática (topo)"');
   cg('cgGeo').innerHTML = h;
   let k = '';
   if (!iso) {
@@ -1713,6 +1812,7 @@ function cgForm() {
       <option value="duas"${c.modo === 'duas' ? ' selected' : ''}>Duas faces opostas permeáveis</option>
       <option value="dominante"${c.modo === 'dominante' ? ' selected' : ''}>Abertura dominante em uma face</option>
       <option value="estanque"${c.modo === 'estanque' ? ' selected' : ''}>Estanque (−0,2 ou 0)</option>
+      <option value="detalhado"${c.modo === 'detalhado' ? ' selected' : ''}>Método detalhado — aberturas (6.3.3)</option>
       <option value="usuario"${c.modo === 'usuario' ? ' selected' : ''}>Informar cpi por direção</option></select>`;
     if (c.modo === 'duas') k += `<label for="cgPar">Faces permeáveis</label><select id="cgPar"><option value="0-180"${c.par === '0-180' ? ' selected' : ''}>Faces menores (0°/180°)</option><option value="90-270"${c.par === '90-270' ? ' selected' : ''}>Faces maiores (90°/270°)</option></select>`;
     if (c.modo === 'dominante') {
@@ -1724,12 +1824,13 @@ function cgForm() {
     }
     if (c.modo === 'usuario') for (const d of [0, 90, 180, 270]) k += f('cgV' + d, `cpi — vento ${d}°`, c['v' + d], 'step="0.05"');
   }
-  cg('cgCpiBox').innerHTML = `<legend>Pressão interna (6.3.2)</legend><div class="frm">${k}</div>`; cg('cgCpiBox').hidden = iso;
+  cg('cgCpiBox').innerHTML = `<legend>Pressão interna (6.3.2)</legend><div class="frm">${k}</div><div id="cgDetBox"></div>`; cg('cgCpiBox').hidden = iso;
+  if (typeof estruturaForm === 'function') estruturaForm();
   const bind = (id, fn) => { const el = cg(id); if (el) el.addEventListener('input', () => { fn(el.value); saveEd(); renderCargas(id === 'cgTipo' || id === 'cgCpi' || id === 'cgAS'); }); };
   const num = v => parseFloat(String(v).replace(',', '.'));
   bind('cgTipo', v => { ed.tipo = v; ed.zRef = null; }); bind('cgA', v => ed.a = num(v)); bind('cgB', v => ed.b = num(v)); bind('cgH', v => ed.h = num(v)); bind('cgNP', v => ed.nPav = num(v)); bind('cgHP', v => ed.hPav = num(v));
   bind('cgI', v => ed.incl = num(v)); bind('cgAlto', v => ed.alto = v); bind('cgHp', v => ed.hp = num(v)); bind('cgN', v => ed.nVaos = num(v));
-  bind('cgL2', v => ed.l2 = num(v)); bind('cgF', v => ed.f = num(v)); bind('cgMet', v => ed.metArco = v); bind('cgCalha', v => ed.calha = v === '1'); bind('cgZ', v => ed.zRef = v === '' ? null : num(v));
+  bind('cgL2', v => ed.l2 = num(v)); bind('cgF', v => ed.f = num(v)); bind('cgAba', v => ed.aba = num(v)); bind('cgV92', v => ed.ved092 = v === '1'); bind('cgMet', v => ed.metArco = v); bind('cgCalha', v => ed.calha = v === '1');
   bind('cgCpi', v => c.modo = v); bind('cgPar', v => c.par = v); bind('cgFace', v => c.face = +v); bind('cgR1', v => c.r1 = num(v));
   bind('cgAS', v => c.altaSuccao = v === '1'); bind('cgR2', v => c.r2 = num(v)); bind('cgZona', v => c.zona = v);
   for (const d of [0, 90, 180, 270]) bind('cgV' + d, v => c['v' + d] = num(v));
@@ -1743,7 +1844,7 @@ function renderCargas(rebuildForm) {
   cg('cgTh').textContent = res.tipo === 'arco' ? `f/b = ${fmt(res.geo.f / res.geo.b, 3)} · h/b = ${fmt(res.geo.hb, 3)}` : `θ = ${fmt(res.geo.th, 2)}°`;
   let h = `<div class="sum">
     <div><span>V0 adotado</span><b>${fmt(L.P.v0, 2)} m/s</b></div>
-    <div><span>Altura de ref. z</span><b>${fmt(zRef, 2)} m</b></div>
+    <div><span>z = topo (pior caso)</span><b>${fmt(zRef, 2)} m</b></div>
     <div><span>Vk(z)</span><b>${fmt(L.vk, 2)} m/s</b></div>
     <div><span>q(z)</span><b>${fmt(q, 1)} kgf/m²</b></div></div>`;
   if (res.avisos.length) h += `<div class="note" style="margin-bottom:10px">${res.avisos.map(escapeHtml).join('<br>')}</div>`;
@@ -1752,8 +1853,11 @@ function renderCargas(rebuildForm) {
     h += `<table class="prof"><thead><tr><th style="text-align:left">Caso</th><th style="text-align:left">Zona</th><th>cp</th><th>p (kgf/m²)</th></tr></thead><tbody>` +
       pr.rows.map(r => `<tr><td style="text-align:left">${r.caso} — ${r.carr}</td><td style="text-align:left">${r.nome}</td><td>${fmt(r.cp, 2)}</td><td><b>${f1(r.p)}</b></td></tr>`).join('') + '</tbody></table>';
     h += `<p class="hint">Sinal positivo = sentido indicado na ${res.tabela} (as duas faces da cobertura já estão englobadas; os carregamentos 1 e 2 são verificações independentes). ` +
-      `Vento paralelo à geratriz — força de atrito (7.2.2): Ft = 0,5·q·a·b = <b>${f1(pr.Ft)} kgf</b>. ` +
-      `Elementos de vedação (7.2.6): cp = ±2,0 → <b>±${f1(2 * q)} kgf/m²</b>.</p>`;
+      `Vento paralelo à geratriz — força de atrito (7.2.2): Ft = 0,05·q·a·b = <b>${f1(pr.Ft)} kgf</b> (a norma 2023 imprime 0,5 — erro de impressão; 0,05 como na edição de 1988). ` +
+      `Elementos de vedação (7.2.6): cp = ±2,0 com q das vedações (${f1(L.qv)} kgf/m², Classe A${ed.ved092 ? ', 0,92·S3' : ''}) → <b>±${f1(2 * L.qv)} kgf/m²</b>.` +
+      (pr.abas ? ` Abas de ${fmt(L.res.geo.aba, 2)} m (7.2.5) — vento ⊥ geratriz: barlavento <b>${f1(pr.abas.perp.barl)} kgf</b>, sotavento <b>${f1(pr.abas.perp.sot)} kgf</b>, paralelas ${f1(pr.abas.perp.par)} kgf cada; vento ∥ geratriz: ${f1(pr.abas.para.barl)} / ${f1(pr.abas.para.sot)} kgf, paralelas ${f1(pr.abas.para.par)} kgf cada.` : '') + '</p>';
+    h += estruturaHTML(L, false);
+    h += consideracoesHTML(L, false);
     cg('cgOut').innerHTML = h; return;
   }
   const vmax = Math.max(...pr.casos.flatMap(c => [...c.paredes, ...c.cobertura].flatMap(z => [Math.abs(z.p.min), Math.abs(z.p.max)])));
@@ -1762,15 +1866,47 @@ function renderCargas(rebuildForm) {
   h += `<div class="cgtabs">${dirs.map(d => `<button data-d="${d}" class="${d === cgDir ? 'primary' : ''}">Vento ${d}°</button>`).join('')}
     ${res.simetrico ? '<span class="hint">(180° e 270° espelhados)</span>' : ''}</div>`;
   const caso = pr.casos.find(c => c.dir === cgDir);
-  h += `<div class="cgdia">${plantaSVG(caso, res, vmax)}</div><div class="cgdia" style="margin-top:8px">${corteSVG(caso, res, vmax, floorsFor(L, caso))}</div>`;
+  h += `<div class="cgplans"><div class="cgdia">${planoSVG(caso, res, 'coef', L)}</div><div class="cgdia">${planoSVG(caso, res, 'carga', L)}</div></div><div class="cgdia" style="margin-top:8px">${corteSVG(caso, res, vmax, floorsFor(L, caso))}</div>`;
   h += `<p class="hint">cpi neste caso: ${caso.cpi.map(v => fmt(v, 2)).join(' ou ')} — ${escapeHtml(res.cpiTxt)} Cores: azul = sucção, vermelho = sobrepressão (valor mais nocivo).</p>`;
   const linhas = (arr, grupo) => arr.map(z => `<tr><td style="text-align:left">${grupo}</td><td style="text-align:left"><b>${z.id}</b> — ${escapeHtml(z.nome)}</td><td>${fmt(z.ce, 2)}</td><td>${f1(z.p.min)}</td><td>${f1(z.p.max)}</td></tr>`).join('');
   h += `<table class="prof"><thead><tr><th style="text-align:left">Elemento</th><th style="text-align:left">Zona</th><th>Ce</th><th>p mín (kgf/m²)</th><th>p máx (kgf/m²)</th></tr></thead><tbody>` +
     linhas(caso.paredes.filter((z, i, s) => s.findIndex(o => o.id === z.id) === i), 'Paredes') + linhas(caso.cobertura.filter((z, i, s) => s.findIndex(o => o.id === z.id) === i), 'Cobertura') + '</tbody></table>';
   h += envoltoriaHTML(L);
+  h += estruturaHTML(L, false);
   h += pavimentosHTML(L, false);
+  h += consideracoesHTML(L, false);
   cg('cgOut').innerHTML = h;
   cg('cgOut').querySelectorAll('.cgtabs button').forEach(bt => bt.onclick = () => { cgDir = +bt.dataset.d; renderCargas(false); });
+}
+/* --- considerações adotadas no cálculo (todas as hipóteses em um só lugar) --- */
+function consideracoes(L) {
+  const r = L.res, g = r.geo, t = r.tipo, iso = !!r.iso, c = [];
+  c.push('V0 lido no mapa digitalizado da Figura 1 (precisão da ordem de ±10 km), interpolado entre as duas isopletas que delimitam o ponto; a "zona de carga" é o limite superior da faixa entre elas (dentro de curva fechada ou além da última isopleta, o valor da própria curva).');
+  c.push(`Pressão dinâmica de projeto no topo da edificação, z = ${fmt(L.zRef, 2)} m (pior caso), para a cobertura, a planta e a envoltória${iso ? '' : '; o fechamento também é apresentado por faixas de altura da Tabela 3 nos cortes'}.`);
+  c.push(`S2 = bm·Fr·(z/10)^p (Tabelas 1 e 2), constante abaixo de 5 m (10 m na Categoria V) e limitado a zg; categoria ${prof.cat}, classe ${prof.cls} para a estrutura principal; vedações e fixações sempre com a Classe A (6.1.1)${ed.ved092 ? ' e 0,92·S3 (Nota da Tabela 4)' : ''}.`);
+  c.push(`q = ½·ρ·Vk², com ρ = ${fmt(L.P.rho, 3)} kg/m³ (${RHO_MODE_TXT[prof.rho_mode || prof.rhoMode]}); conversão para kgf/m² por 9,80665.`);
+  if (!iso) {
+    c.push('Tabelas 6 e 7: faixas de h/b sem interpolação (a norma dá três faixas); interpolação em a/b só onde a norma indica (Nota 2 da Tabela 6, entre 3/2 e 2; Notas das partes A3/B3, I/J).');
+    c.push('Onde a norma não manda interpolar (θ, f/ℓ, h/ℓ, a/b da Tabela 9, proporções de abertura do cpi), adota-se a linha tabelada imediatamente acima do valor real; célula vazia = valor não definido pela norma.');
+    c.push(`Zonas das paredes (Tabela 6): A1/B1 = maior entre b/3 e a/4, limitado a 2h (${fmt(g.L1, 2)} m); C1/D1 = menor entre 2h e b/2 (${fmt(g.Lc1, 2)} m); cpe médio numa faixa = menor entre 0,2b e h (${fmt(g.Lcpe, 2)} m).`);
+    if (t === 't7' || t === 'predio') c.push(`Tabela 7: E/G = faixa x = maior entre b/3 e a/4, limitada a 2h (${fmt(g.x, 2)} m), junto à empena de barlavento; regiões de cpe médio com y = menor entre h e 0,15b (${fmt(g.y, 2)} m).`);
+    if (t === 't8') c.push('Tabela 8: H e I = metade junto ao beiral alto (leitura do corte A-A da norma); vento a 90° atinge primeiro o beiral alto; θ < 5° usa a linha de 5°.');
+    if (t === 't9') c.push('Tabela 9 (calha central, ensaiada para h/b = 0,5): cpe médio = valor de borda mais severo dos diagramas do caso (a/b e θ pela linha acima).');
+    if (/^t1[012]$/.test(t)) c.push("Telhados múltiplos: b1 = b2 = h; y = menor entre h e 0,1b; y' = menor entre h, 0,1b e 0,25a'. Para α = 0° o atrito já está nos Ce (Tabelas 10 e 11); para α = 90° vale 6.1.5.");
+    if (t === 'arco') c.push('Abóbada: parte do arco em seis partes iguais (vento ⊥ geratriz); faixas A1/D1 de 0,1·vão (Figura 7-b) ou E/F/G/H de b/10 e b/6 (Figura 8); coeficientes de coberturas curvas são orientação para o projeto (6.2.3).');
+    c.push('cpi pelo método simplificado (6.3.2); quando a norma dá alternativas (−0,3 ou 0; −0,2 ou 0) usa-se a mais nociva em cada zona. Cobertura considerada impermeável; com cobertura permeável sem forro ou aberturas especiais, usar o método detalhado (6.3.3).');
+    c.push('Pressão efetiva p = q·(Ce − cpi): positiva para dentro (sobrepressão), negativa para fora (sucção). Zonas de alta sucção combinadas com o maior cpi, apenas para vedações e fixações.');
+  } else {
+    c.push(`Cobertura isolada (7.2): coeficientes das Tabelas 24/25 já englobam as duas faces; carregamentos 1 e 2 independentes; condição h ≥ 0,5·ℓ2 verificada; atrito Ft = 0,05·q·a·b (0,5 impresso na norma tratado como erro de impressão); vedações com cp = ±2,0.`);
+    if (g.aba > 0) c.push('Abas (testeiras) com inclinação até 30° da vertical: F = 1,3·q·Ae (barlavento), 0,8·q·Ae (sotavento) e Ft = 0,05·q·Ae nas paralelas, englobando as duas faces (7.2.5).');
+  }
+  c.push('Não incluídos: efeitos de vizinhança (fv = 1,0), resposta dinâmica (estruturas com T1 > 1 s), forças de arrasto globais (Ca) e de atrito em edificações longas (6.1.5).');
+  return c;
+}
+function consideracoesHTML(L, memorial) {
+  const li = consideracoes(L).map(x => `<li>${x}</li>`).join('');
+  return memorial ? `<h3 style="margin-top:12px">Considerações adotadas</h3><ol class="cons">${li}</ol>`
+    : `<details class="cgcons"><summary>Considerações adotadas no cálculo</summary><ol>${li}</ol></details>`;
 }
 function envoltoriaHTML(L) {
   const { pr, res } = L, e = pr.env, f1 = v => v == null ? '—' : fmt(v, 1);
@@ -1780,7 +1916,7 @@ function envoltoriaHTML(L) {
     <div>${cel(e.cobertura.pos, 'Cobertura — sobrepressão')}</div><div>${cel(e.cobertura.neg, 'Cobertura — sucção')}</div></div>`;
   h += `<table class="prof"><thead><tr><th style="text-align:left">Zonas de alta sucção (fixação de telhas e fechamentos)</th><th>cpe médio</th><th>p (kgf/m²)</th></tr></thead><tbody>` +
     e.locais.map(l => `<tr><td style="text-align:left">${l.grupo === 'paredes' ? 'Paredes' : 'Cobertura'} — ${escapeHtml(l.nome)} <span class="hint">(${l.ref})</span></td><td>${l.cpe == null ? 'n/a' : fmt(l.cpe, 2)}</td><td><b>${f1(l.pNeg)}</b></td></tr>`).join('') +
-    `</tbody></table><p class="hint">Zonas de alta sucção combinadas com o maior cpi (${fmt(e.cpiMax, 2)}). Valores para os elementos de vedação e suas fixações junto às bordas; os coeficientes gerais (Ce) valem para a estrutura principal.</p>`;
+    `</tbody></table><p class="hint">Zonas de alta sucção: p = qv·(cpe médio − cpi máx = ${fmt(e.cpiMax, 2)}), com a pressão dinâmica das vedações qv = ${fmt(L.qv, 1)} kgf/m² (S2 da Classe A${ed.ved092 ? ' e 0,92·S3' : ''}, 6.1.1). Valem só para os elementos de vedação e suas fixações; os Ce gerais valem para a estrutura principal.</p>`;
   void res; return h;
 }
 /* --- janela única "Vento": abas 1 · Perfil de vento / 2 · Cargas na edificação --- */
@@ -1807,7 +1943,7 @@ function cargasMemorialHTML() {
   let h = `<h2 class="brk">6. Cargas por setor na edificação</h2>
   <table><tr><td style="width:28%">Tipo</td><td>${TIPOS_ED[res.tipo]}</td></tr>
   <tr><td>Dimensões</td><td>a = ${fmt(res.geo.a, 2)} m · b = ${fmt(res.geo.b, 2)} m · h = ${fmt(res.geo.h, 2)} m · i = ${fmt(+ed.incl, 1)} % (θ = ${fmt(res.geo.th, 2)}°)${res.geo.n ? ` · ${res.geo.n} tramos de a' = ${fmt(res.geo.ap, 2)} m` : ''}${res.geo.l2 ? ` · ℓ2 = ${fmt(res.geo.l2, 2)} m` : ''}</td></tr>
-  <tr><td>Pressão dinâmica</td><td>z = ${fmt(zRef, 2)} m → Vk = ${fmt(L.vk, 2)} m/s → <b>q = ${f1(q)} kgf/m²</b></td></tr>
+  <tr><td>Pressão dinâmica</td><td>z = ${fmt(zRef, 2)} m (topo da edificação — pior caso, usado na planta, na cobertura e na envoltória) → Vk = ${fmt(L.vk, 2)} m/s → <b>q = ${f1(q)} kgf/m²</b></td></tr>
   ${res.iso ? '' : `<tr><td>Pressão interna</td><td>${escapeHtml(res.cpiTxt)}</td></tr>`}
   <tr><td>Coeficientes</td><td>Paredes: Tabela 6${res.geo.bandaT6 ? ' (' + res.geo.bandaT6 + ')' : ''} · Cobertura: ${res.tabela}. p = q·(Ce − cpi), em kgf/m² (+ sobrepressão, − sucção).</td></tr></table>`;
   if (res.avisos.length) h += `<p class="note">${res.avisos.map(escapeHtml).join('<br>')}</p>`;
@@ -1815,12 +1951,16 @@ function cargasMemorialHTML() {
     h += `<div style="margin-top:8px">${corteIsoSVG(res, q)}</div>`;
     h += `<table style="margin-top:8px"><tr><th>Caso</th><th>Zona</th><th class="n">cp</th><th class="n">p (kgf/m²)</th></tr>` +
       pr.rows.map(r => `<tr><td>${r.caso} — ${r.carr}</td><td>${r.nome}</td><td class="n">${fmt(r.cp, 2)}</td><td class="n">${f1(r.p)}</td></tr>`).join('') + '</table>' +
-      `<p>Força de atrito, vento paralelo à geratriz (7.2.2): Ft = 0,5·q·a·b = <b>${f1(pr.Ft)} kgf</b>. Elementos de vedação (7.2.6): cp = ±2,0 → <b>±${f1(2 * q)} kgf/m²</b>.</p>`;
+      '<p>' + `Vento paralelo à geratriz — força de atrito (7.2.2): Ft = 0,05·q·a·b = <b>${f1(pr.Ft)} kgf</b> (a norma 2023 imprime 0,5 — erro de impressão; 0,05 como na edição de 1988). ` +
+      `Elementos de vedação (7.2.6): cp = ±2,0 com q das vedações (${f1(L.qv)} kgf/m², Classe A${ed.ved092 ? ', 0,92·S3' : ''}) → <b>±${f1(2 * L.qv)} kgf/m²</b>.` +
+      (pr.abas ? ` Abas de ${fmt(L.res.geo.aba, 2)} m (7.2.5) — vento ⊥ geratriz: barlavento <b>${f1(pr.abas.perp.barl)} kgf</b>, sotavento <b>${f1(pr.abas.perp.sot)} kgf</b>, paralelas ${f1(pr.abas.perp.par)} kgf cada; vento ∥ geratriz: ${f1(pr.abas.para.barl)} / ${f1(pr.abas.para.sot)} kgf, paralelas ${f1(pr.abas.para.par)} kgf cada.` : '') + '</p>';
+    h += estruturaHTML(L, true);
+    h += consideracoesHTML(L, true);
     return h;
   }
   const vmax = Math.max(...pr.casos.flatMap(c => [...c.paredes, ...c.cobertura].flatMap(z => [Math.abs(z.p.min), Math.abs(z.p.max)])));
   const dirs = res.simetrico ? [0, 90] : [0, 90, 180, 270];
-  h += `<div class="charts">${dirs.map(d => `<div><h3>Vento ${d}° — planta, p (kgf/m², valor mais nocivo)</h3>${plantaSVG(pr.casos.find(c => c.dir === d), res, vmax)}</div><div><h3>Vento ${d}° — corte</h3>${corteSVG(pr.casos.find(c => c.dir === d), res, vmax, floorsFor(L, pr.casos.find(c => c.dir === d)))}</div>`).join('')}</div>`;
+  h += `<div class="charts charts1">${dirs.map(d => `<div><h3>Vento ${d}° — coeficientes (NBR 6123)</h3>${planoSVG(pr.casos.find(c => c.dir === d), res, 'coef', L)}</div><div><h3>Vento ${d}° — cargas (kgf/m²)</h3>${planoSVG(pr.casos.find(c => c.dir === d), res, 'carga', L)}</div><div><h3>Vento ${d}° — corte</h3>${corteSVG(pr.casos.find(c => c.dir === d), res, vmax, floorsFor(L, pr.casos.find(c => c.dir === d)))}</div>`).join('')}</div>`;
   for (const d of dirs) {
     const c = pr.casos.find(x => x.dir === d), uniq = arr => arr.filter((z, i, s) => s.findIndex(o => o.id === z.id) === i);
     h += `<table style="margin-top:8px"><tr><th colspan="5">Vento ${d}° — cpi ${c.cpi.map(v => fmt(v, 2)).join(' ou ')}</th></tr><tr><th>Elemento / zona</th><th class="n">Ce</th><th class="n">p mín</th><th class="n">p máx</th></tr>` +
@@ -1832,13 +1972,15 @@ function cargasMemorialHTML() {
   h += `<h3 style="margin-top:12px">Envoltória para dimensionamento (kgf/m²)</h3><table>${o(e.paredes.pos, 'Fechamento lateral — sobrepressão')}${o(e.paredes.neg, 'Fechamento lateral — sucção')}${o(e.cobertura.pos, 'Cobertura — sobrepressão')}${o(e.cobertura.neg, 'Cobertura — sucção')}</table>`;
   h += `<table style="margin-top:8px"><tr><th>Zonas de alta sucção (vedações e fixações)</th><th class="n">cpe médio</th><th class="n">p (kgf/m²)</th></tr>` +
     e.locais.map(l => `<tr><td>${l.grupo === 'paredes' ? 'Paredes' : 'Cobertura'} — ${escapeHtml(l.nome)} (${l.ref})</td><td class="n">${l.cpe == null ? 'n/a' : fmt(l.cpe, 2)}</td><td class="n"><b>${f1(l.pNeg)}</b></td></tr>`).join('') +
-    `</table><p class="note">Zonas de alta sucção combinadas com o maior cpi (${fmt(e.cpiMax, 2)}).</p>`;
+    `</table><p class="note">Zonas de alta sucção: p = qv·(cpe médio − cpi máx = ${fmt(e.cpiMax, 2)}), qv = ${fmt(L.qv, 1)} kgf/m² (S2 da Classe A${ed.ved092 ? ' e 0,92·S3' : ''}, 6.1.1) — só para vedações e fixações.</p>`;
+  h += estruturaHTML(L, true);
+  h += consideracoesHTML(L, true);
   return h;
 }
 function cargasXlsxRows() {
   if (!lastCargas) return null;
   const L = cargasCalc(), { res, pr, q, zRef } = L, rows = [['Cargas por setor — ' + TIPOS_ED[res.tipo]], ['q (kgf/m²)', +q.toFixed(2), 'z (m)', +zRef.toFixed(2)], []];
-  if (res.iso) { rows.push(['Caso', 'Carregamento', 'Zona', 'cp', 'p (kgf/m²)']); pr.rows.forEach(r => rows.push([r.caso, r.carr, r.nome, r.cp, +r.p.toFixed(2)])); rows.push([], ['Ft (kgf)', +pr.Ft.toFixed(1)]); return rows; }
+  if (res.iso) { rows.push(['Caso', 'Carregamento', 'Zona', 'cp', 'p (kgf/m²)']); pr.rows.forEach(r => rows.push([r.caso, r.carr, r.nome, r.cp, +r.p.toFixed(2)])); rows.push([], ['Ft (kgf)', +pr.Ft.toFixed(1)]); if (typeof estruturaXlsx === 'function') rows.push(...estruturaXlsx(L)); return rows; }
   rows.push(['Vento (°)', 'Elemento', 'Zona', 'Descrição', 'Ce', 'cpi', 'p mín (kgf/m²)', 'p máx (kgf/m²)']);
   for (const c of pr.casos) for (const [g, arr] of [['Parede', c.paredes], ['Cobertura', c.cobertura]])
     arr.filter((z, i, s) => s.findIndex(o => o.id === z.id) === i).forEach(z => rows.push([c.dir, g, z.id, z.nome, z.ce, c.cpi.join(' ou '), +z.p.min.toFixed(2), +z.p.max.toFixed(2)]));
@@ -1847,10 +1989,421 @@ function cargasXlsxRows() {
   const pav = pavimentos(L);
   if (pav) {
     const r2 = v => v == null ? '' : +v.toFixed(2);
-    rows.push([], ['Fachadas por pavimento (q no topo de cada pavimento, valor mais nocivo, kgf/m²)'],
-      ['Pav.', 'z (m)', 'S2', 'q', '0° barl. C', '0° sotav. D', '0° lateral A1', '90° barl. A', '90° sotav. B', '90° lateral C1', 'Faixa local (cpe)']);
+    rows.push([], [(res.geo.nPav ? 'Fachadas por pavimento' : 'Fechamento por faixa de altura') + ' (q no topo de cada faixa, valor mais nocivo, kgf/m²)'],
+      [res.geo.nPav ? 'Pav.' : 'Faixa z (m)', 'z topo (m)', 'S2', 'q', '0° barl. C', '0° sotav. D', '0° lateral A1', '90° barl. A', '90° sotav. B', '90° lateral C1', 'Faixa local (cpe)']);
     pav.forEach(r => rows.push([r.pav, r2(r.z), +r.s2.toFixed(4), r2(r.q), r2(r.W0), r2(r.L0), r2(r.S0), r2(r.W90), r2(r.L90), r2(r.S90), r2(r.loc)]));
   }
+  if (typeof estruturaXlsx === 'function') rows.push(...estruturaXlsx(L));
+  return rows;
+}
+
+/* ============================================================
+   ESTRUTURA — ações globais a partir das pressões (NBR 6123:2023)
+   · Cargas no pórtico transversal (kgf/m = p × espaçamento)
+   · Forças de arrasto por nível com Ca (Figuras 4 e 5) e excentricidade (6.1.4)
+   · Força de atrito (6.1.5)
+   · Coberturas isoladas: resultantes e reações por linha de pilares (7.2)
+   Referência de verificação: manual CBCA "Ações devidas ao vento em estruturas"
+   (Pravia & Vanin, 2026), exemplos 3.1 a 3.4.
+   ============================================================ */
+// Ábacos de Ca digitalizados das Figuras 4 (baixa turbulência) e 5 (alta turbulência):
+// para cada curva Ca, pontos (ℓ1/ℓ2, h/ℓ1). Conferidos com o manual CBCA: Ca = 0,96 / 1,21 (Fig. 4)
+// e 0,83 / 0,99 (Fig. 5) para ℓ1/ℓ2 = 0,59 e 1,69, h/ℓ1 = 1,36 e 0,80.
+const CA_FIG4 = {"1":[[0.2534,37.4716],[0.2666,31.2951],[0.2806,26.1367],[0.2952,21.9366],[0.3107,18.3208],[0.3269,15.2632],[0.344,12.8421],[0.362,10.6989],[0.3809,8.9796],[0.4067,7.1208],[0.4279,5.9471],[0.4503,4.9791],[0.4738,4.1686],[0.5059,3.3057],[0.5323,2.7608],[0.5601,2.3172],[0.5894,1.9139],[0.6202,1.5009],[0.6526,1.2397],[0.7121,0.9462],[0.7493,0.8353],[0.8118,0.7063],[0.8542,0.6305],[0.9187,0.5539],[0.9597,0.5169]],"2":[[1.0246,38.693],[1.0782,34.4563],[1.1345,31.6445],[1.1938,29.6416],[1.2562,28.0409],[1.3218,26.6249],[1.3909,25.5943],[1.4636,24.7558],[1.5401,24.0632],[1.6206,23.5057],[1.7052,23.0747],[1.7944,22.7356],[1.8881,22.4015],[2.0455,22.1542],[2.1524,22.0451],[2.2648,22.0451],[2.3832,22.1542],[2.5445,22.4015],[2.6774,22.5123],[2.8174,22.8481],[3.0744,23.6511],[3.2351,24.1822],[3.4041,24.8782],[3.582,25.7844],[3.7692,26.889],[3.9089,27.7312]],"0.7":[[0.2534,1.5084],[0.2666,1.2628],[0.2806,1.0784],[0.2952,0.9357],[0.3107,0.818],[0.3269,0.7231],[0.344,0.6423],[0.362,0.5748],[0.3809,0.5182]],"0.8":[[0.2534,7.2359],[0.2666,5.6887],[0.2806,4.5503],[0.2952,3.6757],[0.3107,3.0173],[0.3269,2.5014],[0.344,2.0994],[0.362,1.7751],[0.3809,1.5046],[0.4096,1.1961],[0.431,1.029],[0.4536,0.8962],[0.4773,0.7786],[0.5059,0.674],[0.5323,0.5906],[0.5601,0.5221]],"0.9":[[0.2534,20.0226],[0.2666,16.4765],[0.2806,13.5417],[0.2952,11.1023],[0.3107,9.136],[0.3269,7.481],[0.344,6.1561],[0.362,5.0533],[0.3809,4.1379],[0.4067,3.2252],[0.4279,2.654],[0.4503,2.1839],[0.4738,1.7927],[0.517,1.2597],[0.544,1.0599],[0.5725,0.9028],[0.6112,0.7429],[0.6432,0.6487],[0.6768,0.5699],[0.6817,0.5629]],"1.1":[[0.3062,37.657],[0.3222,31.4499],[0.339,26.266],[0.3567,21.9366],[0.3754,17.9184],[0.4067,13.6592],[0.4279,11.3796],[0.4503,9.5039],[0.4738,7.9374],[0.5059,6.2633],[0.5323,5.2309],[0.5601,4.358],[0.5894,3.6217],[0.6202,3.0247],[0.6526,2.5262],[0.7121,1.8375],[0.7493,1.5652],[0.8118,1.2817],[0.8542,1.1273],[0.9187,0.9698],[0.9667,0.8798],[1.0246,0.7932],[1.0782,0.7284],[1.1345,0.6706],[1.1938,0.6205],[1.2562,0.5776],[1.3218,0.5344],[1.3609,0.515]],"1.2":[[0.3465,39.4644],[0.3646,33.8245],[0.3837,28.4591],[0.4067,23.6803],[0.4279,20.0226],[0.4503,16.9298],[0.4738,14.3325],[0.5059,11.5494],[0.5323,9.7895],[0.5601,8.257],[0.5894,6.9988],[0.6202,5.9178],[0.6526,5.0037],[0.7121,3.5773],[0.7493,2.951],[0.8118,2.3575],[0.8542,2.0508],[0.9187,1.7577],[0.9667,1.5925],[1.0246,1.4393],[1.0782,1.3218],[1.1345,1.223],[1.1938,1.1357],[1.2562,1.0612],[1.3218,0.9855],[1.3909,0.9265],[1.4636,0.8722],[1.5401,0.8241],[1.6206,0.7834],[1.7052,0.742],[1.7944,0.708],[1.8881,0.6773],[2.0455,0.629],[2.1524,0.6016],[2.2648,0.5791],[2.3832,0.5553],[2.5445,0.5305],[2.6774,0.5112],[2.697,0.51]],"1.3":[[0.4067,37.75],[0.4279,31.7619],[0.4503,26.6578],[0.4738,22.4292],[0.5059,17.9184],[0.5323,15.0389],[0.5601,12.6534],[0.5894,10.6462],[0.6202,8.9575],[0.6526,7.5366],[0.7121,5.5227],[0.7493,4.751],[0.8118,3.9387],[0.8542,3.4815],[0.9187,3.036],[0.9667,2.7813],[1.0246,2.5324],[1.0782,2.3517],[1.1345,2.1866],[1.1938,2.0356],[1.2562,1.9091],[1.3218,1.7795],[1.3909,1.6813],[1.4636,1.5886],[1.5401,1.5009],[1.6206,1.4287],[1.7052,1.3649],[1.7944,1.3024],[1.8881,1.2427],[2.0455,1.1627],[2.1524,1.1149],[2.2648,1.0757],[2.3832,1.0353],[2.5445,0.9904],[2.6774,0.9556],[2.8174,0.9265],[3.0744,0.8798],[3.2351,0.852],[3.4041,0.8312],[3.582,0.81],[3.7692,0.7892],[3.9089,0.7748]],"1.4":[[0.447,39.2701],[0.4704,33.2043],[0.5059,26.266],[0.5323,22.1542],[0.5601,18.7322],[0.5894,15.7997],[0.6202,13.0015],[0.6526,10.9122],[0.7121,8.5156],[0.7493,7.6019],[0.8118,6.5478],[0.8542,5.9324],[0.9187,5.309],[0.9667,4.9424],[1.0246,4.5728],[1.0782,4.2781],[1.1345,4.0221],[1.1938,3.8002],[1.2562,3.5994],[1.3218,3.3925],[1.3909,3.2291],[1.4636,3.0812],[1.5401,2.9401],[1.6206,2.8228],[1.7052,2.7102],[1.7944,2.5989],[1.8881,2.5014],[2.0455,2.3692],[2.1524,2.2916],[2.2648,2.222],[2.3832,2.1545],[2.5445,2.0762],[2.6774,2.0256],[2.8174,1.9787],[3.0744,1.8927],[3.2351,1.8489],[3.4041,1.8127],[3.582,1.7751],[3.7692,1.7426],[3.9089,1.7212]],"1.5":[[0.5246,39.8067],[0.552,34.3714],[0.5809,28.9906],[0.6112,24.8169],[0.6432,21.2441],[0.6768,17.9184],[0.7121,15.3766],[0.7493,13.5417],[0.8118,11.5779],[0.8542,10.4639],[0.9187,9.3643],[0.9667,8.7176],[1.0246,8.0856],[1.0782,7.6019],[1.1345,7.1825],[1.1938,6.8199],[1.2562,6.4755],[1.3218,6.1485],[1.3909,5.8741],[1.4636,5.6328],[1.5401,5.4081],[1.6206,5.2116],[1.7052,5.0285],[1.7944,4.8637],[1.8881,4.716],[2.0455,4.5056],[2.1524,4.3849],[2.2648,4.2781],[2.3832,4.1686],[2.5445,4.042],[2.6774,3.9875],[2.8174,3.8952],[3.0744,3.7815],[3.2351,3.7214],[3.4041,3.6803],[3.582,3.6262],[3.7692,3.5906],[3.9089,3.5597]],"1.6":[[0.6112,37.657],[0.6432,32.8782],[0.6768,28.7059],[0.7121,24.9397],[0.7493,21.7211],[0.8118,16.9507],[0.8542,14.6724],[0.9187,12.7317],[0.9667,11.7506],[1.0246,10.8451],[1.0782,10.1712],[1.1345,9.61],[1.1938,9.1023],[1.2562,8.6854],[1.3218,8.2979],[1.3909,7.9668],[1.4636,7.6963],[1.5401,7.4442],[1.6206,7.2181],[1.7052,8.1457],[1.7944,6.8367],[1.8881,6.7031],[2.0455,6.4915],[2.1524,6.3646],[2.2648,6.2633],[2.3832,6.1942],[2.5445,6.1031],[2.6774,6.0283],[2.8379,5.9986],[3.5,5.95],[4,6]],"1.7":[[0.6768,39.6596],[0.7121,34.3714],[0.7493,29.5686],[0.8118,23.8269],[0.8542,21.0355],[0.9187,18.366],[0.9667,16.8257],[1.0246,15.3577],[1.0782,14.1044],[1.1345,13.0336],[1.1938,12.1786],[1.2562,11.5067],[1.3218,10.8987],[1.3909,10.4639],[1.4636,10.0713],[1.5401,9.7534],[1.6206,9.5157],[1.7052,9.2723],[1.7944,9.0798],[1.8881,8.9244],[2.0455,8.7069],[2.1524,8.6213],[2.2648,8.5789],[2.3832,8.5367],[2.5445,8.5367],[2.6774,8.5367],[2.8174,8.5789],[3.0744,8.7069],[3.2351,8.8476],[3.3065,8.8695],[3.65,9.6],[4,9.9]],"1.8":[[0.7771,39.5619],[0.8177,34.7123],[0.8605,30.2699],[0.9187,25.0631],[0.9667,22.5123],[1.0246,20.3463],[1.0782,18.7784],[1.1345,17.5682],[1.1938,16.5172],[1.2562,15.606],[1.3218,14.745],[1.3909,14.035],[1.4636,13.4088],[1.5401,12.9216],[1.6206,12.5756],[1.7052,12.2388],[1.7944,11.9996],[1.8881,12.9216],[2.0455,11.5636],[2.1524,11.5067],[2.2648,11.5067],[2.3832,11.5067],[2.5445,11.5636],[2.6774,11.6927],[2.8174,11.8379],[3.0744,12.2388],[3.2351,12.5291],[3.4041,12.9216],[3.582,13.4088],[3.7692,13.9659],[3.9089,14.4746]],"1.9":[[0.8794,39.7086],[0.9254,35.7996],[0.9738,32.1165],[1.0246,29.0622],[1.0782,26.6907],[1.1345,24.5126],[1.1938,22.4569],[1.2562,20.9319],[1.3218,19.6797],[1.3909,18.7322],[1.4636,18.0738],[1.5401,17.4817],[1.6206,16.9926],[1.7052,16.5989],[1.7944,16.2544],[1.8881,16.0156],[2.0455,15.7802],[2.1524,15.6832],[2.2648,15.606],[2.3832,15.606],[2.5445,15.7219],[2.6774,15.8583],[2.8174,16.0156],[3.0744,16.5172],[3.2351,16.8673],[3.4041,17.3528],[3.582,17.8963],[3.7692,18.5482],[3.9089,19.1292]],"2.1":[[1.238,41.7173],[1.3027,39.5619],[1.3708,37.4254],[1.4425,35.7113],[1.5401,34.16],[1.6206,33.1634],[1.7052,32.3551],[1.7944,31.8011],[1.8881,31.3338],[2.0455,30.8352],[2.1524,30.6456],[2.2648,32.1165],[2.3832,30.6456],[2.5445,30.8352],[2.6774,31.1411],[2.8174,31.6445],[3.0744,32.7164],[3.2351,33.5751],[3.4041,34.6267],[3.582,35.888],[3.7692,37.6105],[3.9089,38.9805]],"2.2":[[1.5401,42.654],[1.6206,41.8203],[1.7052,40.9019],[1.7944,40.3008],[2.0455,45.2562],[2.1681,40.2015],[2.2814,40.3008],[2.4006,41.155],[2.5445,42.0272],[2.6006,42.3395]]};
+const CA_FIG5 = {"1":[[0.6314,6.1463],[0.6637,5.8507],[0.7093,5.4071],[0.7456,5.0752],[0.8169,4.5409],[0.8587,4.2502],[0.9177,3.8458],[0.9646,3.5693],[1.0309,3.2116],[1.0836,2.9431],[1.139,2.6782],[1.1972,2.42],[1.2689,2.1141],[1.3338,1.8703],[1.402,1.6293],[1.4737,1.3838],[1.549,1.1802],[1.6282,1.0267],[1.7114,0.916],[1.7989,0.8219],[1.8909,0.7395],[2.0547,0.6334],[2.1598,0.5805],[2.2702,0.5327],[2.3082,0.5179]],"0.7":[[0.2349,1.1936],[0.2531,1.0412],[0.2661,0.9488],[0.2797,0.8683],[0.294,0.7935],[0.309,0.7241],[0.3248,0.6598],[0.3414,0.603],[0.3588,0.5502],[0.371,0.5194]],"0.8":[[0.2844,6.1463],[0.3064,5.3391],[0.3221,4.8243],[0.3386,4.3593],[0.3559,3.9059],[0.3741,3.4947],[0.4099,2.8095],[0.4308,2.4751],[0.4528,2.1561],[0.476,1.8703],[0.5087,1.5185],[0.5392,1.2364],[0.5667,1.0238],[0.6159,0.8231],[0.6473,0.7395],[0.6804,0.673],[0.7152,0.6167],[0.7518,0.5652],[0.7772,0.5387]],"0.9":[[0.4202,6.1463],[0.4417,5.6404],[0.4643,5.0967],[0.5087,4.2802],[0.5347,3.8567],[0.5621,3.4702],[0.6159,2.8414],[0.6473,2.528],[0.6804,2.2555],[0.7152,1.9927],[0.7518,1.731],[0.8169,1.376],[0.8587,1.1836],[0.9177,0.9968],[0.9646,0.8931],[1.0309,0.7835],[1.0836,0.714],[1.139,0.6543],[1.1972,0.603],[1.2584,0.5526],[1.3228,0.5165],[1.3338,0.5121]],"1.1":[[1.0927,6.1376],[1.1485,5.8179],[1.2072,5.5148],[1.2689,5.2128],[1.3338,4.8859],[1.402,4.5795],[1.4737,4.2802],[1.549,3.9892],[1.6282,3.6558],[1.7114,3.3691],[1.7989,3.0788],[1.8909,2.7898],[2.0547,2.3265],[2.1598,2.0496],[2.2702,1.7654],[2.3862,1.4701],[2.5503,1.0427],[2.6806,0.8574],[2.8177,0.7354],[3.0873,0.592],[3.2452,0.5335],[3.2996,0.515]],"1.2":[[1.7257,6.1463],[1.8139,5.6723],[1.9067,5.1981],[2.0547,4.4838],[2.1598,4.0288],[2.2702,3.5945],[2.3862,3.1667],[2.5503,2.6038],[2.6806,2.2084],[2.8177,1.8056],[3.0873,1.2088],[3.2452,1.0123],[3.4111,0.8622],[3.5855,0.7458],[3.7687,0.6534],[3.8961,0.5937]],"1.3":[[2.2328,6.1376],[2.3469,5.4761],[2.5503,4.3348],[2.6806,3.7391],[2.8177,3.1756],[3.0873,2.2428],[3.2452,1.8546],[3.4111,1.5422],[3.5855,1.297],[3.7687,1.1],[3.8961,0.9814]],"1.4":[[2.7712,6.1376],[2.9129,5.4761],[3.0873,4.6706],[3.2452,4.0401],[3.4111,3.4556],[3.5855,2.8898],[3.7687,2.42],[3.8961,2.1471]],"1.5":[[3.2632,6.251],[3.6964,4.8653],[4.0278,4.0974]],"1.6":[[3.7583,6.251],[4.0278,5.7608]]};
+const KN = v => v;   // todas as ações em kgf (kgf/m², kgf/m, kgf, kgf·m)
+
+function caAbaco(r, hl, alta) {
+  const C = Object.entries(alta ? CA_FIG5 : CA_FIG4).map(([c, p]) => ({ ca: +c, p })).sort((x, y) => x.ca - y.ca);
+  const rmin = Math.min(...C.map(c => c.p[0][0])), rmax = Math.max(...C.map(c => c.p[c.p.length - 1][0]));
+  const hmax = alta ? 6 : 40, fora = r < rmin - 1e-6 || r > rmax + 1e-6 || hl < 0.5 - 1e-6 || hl > hmax + 1e-6;
+  r = Math.min(rmax, Math.max(rmin, r)); hl = Math.min(hmax, Math.max(0.5, hl));
+  const lg = Math.log10;
+  const yAt = p => {
+    if (r < p[0][0] - 1e-9 || r > p[p.length - 1][0] + 1e-9) return null;
+    for (let i = 0; i < p.length - 1; i++) {
+      const a = lg(p[i][0]), b = lg(p[i + 1][0]), x = lg(r);
+      if (x >= a - 1e-12 && x <= b + 1e-12) { const t = b > a ? (x - a) / (b - a) : 0; return 10 ** (lg(p[i][1]) + t * (lg(p[i + 1][1]) - lg(p[i][1]))); }
+    }
+    return null;
+  };
+  const pres = C.map(c => ({ ca: c.ca, y: yAt(c.p) })).filter(c => c.y != null).sort((x, y) => x.y - y.y);
+  let lo = null, hi = null;
+  for (const c of pres) { if (c.y <= hl) lo = c; else { hi = c; break; } }
+  const ca = lo && hi ? lo.ca + (lg(hl) - lg(lo.y)) / (lg(hi.y) - lg(lo.y)) * (hi.ca - lo.ca) : (lo || hi || { ca: 1.2 }).ca;
+  return { ca: Math.round(ca * 100) / 100, fora };
+}
+
+/* --- cargas no pórtico: p = (Ce − cpi)·q, w = p·e (positivo para dentro) --- */
+function porticoCargas(L, e) {
+  const { res, pr, q } = L; if (res.iso || !(e > 0) || res.tipo === 'predio') return null;
+  const g = res.geo, qk = KN(q), out = [];
+  const ladoW = { 0: 'W', 180: 'E', 90: 'S', 270: 'N' };
+  for (const d of [90, 270, 0]) {
+    const cs = pr.casos.find(c => c.dir === d); if (!cs) continue;
+    const cpis = cs.cpi, cmax = Math.max(...cpis), cmin = Math.min(...cpis);
+    let el;
+    if (d !== 0) { // pórtico intermediário (x = a/2), vento no plano do pórtico
+      const W = cs.paredes.find(w => w.lado === ladoW[d]), Lw = cs.paredes.find(w => w.lado === { S: 'N', N: 'S' }[ladoW[d]]);
+      const roof = cs.cobertura.filter(z => a2in(z, g.a / 2)).sort((x, y) => d === 90 ? x.y0 - y.y0 : y.y0 - x.y0);
+      el = [{ id: W.id, nome: 'Pilar de barlavento', ce: W.ce }, ...roof.map(z => ({ id: z.id, nome: 'Cobertura — ' + z.nome, ce: z.ce })), { id: Lw.id, nome: 'Pilar de sotavento', ce: Lw.ce }];
+    } else {        // primeiro pórtico junto ao oitão de barlavento (x = e), vento perpendicular ao plano
+      const x = Math.min(e, g.a / 2), S = cs.paredes.find(w => w.lado === 'S' && x >= w.x0 - 1e-6 && x <= w.x1 + 1e-6), N = cs.paredes.find(w => w.lado === 'N' && x >= w.x0 - 1e-6 && x <= w.x1 + 1e-6);
+      const roof = cs.cobertura.filter(z => a2in(z, x)).sort((p1, p2) => p1.y0 - p2.y0);
+      el = [{ id: S.id, nome: 'Pilar (fachada y = 0)', ce: S.ce }, ...roof.map(z => ({ id: z.id, nome: 'Cobertura — ' + z.nome, ce: z.ce })), { id: N.id, nome: 'Pilar (fachada y = b)', ce: N.ce }];
+    }
+    const lin = el.map(z => ({ ...z, wMax: (z.ce - cmax) * qk * e, wMin: (z.ce - cmin) * qk * e }));
+    out.push({ dir: d, cpiMax: cmax, cpiMin: cmin, el: lin, x: d === 0 ? Math.min(e, g.a / 2) : g.a / 2 });
+  }
+  return { e, qk, casos: out };
+}
+const a2in = (z, x) => x >= z.x0 - 1e-6 && x <= z.x1 + 1e-6;
+
+/* --- forças de arrasto por nível (edificações de múltiplos pavimentos) --- */
+function arrastoNiveis(L) {
+  const { res, P } = L, g = res.geo; if (!g.nPav) return null;
+  const H = g.h, hp = g.hPav, alta = !!ed.altaTurb, viz = !!ed.vizinhanca, k = viz ? 0.15 : 0.075, out = [];
+  for (const d of [0, 90]) {
+    const l1 = d === 0 ? g.b : g.a, l2 = d === 0 ? g.a : g.b, ca = caAbaco(l1 / l2, H / l1, alta);
+    const ecc = k * (d === 0 ? g.b : g.a), niv = [];
+    for (let i = 1; i <= g.nPav; i++) {
+      const z = i * hp, z0 = z - hp / 2, z1 = Math.min(z + hp / 2, H), qz = P.qz(z1), Ae = l1 * (z1 - z0);
+      const Fa = ca.ca * KN(qz) * Ae;
+      niv.push({ nivel: z, z0, z1, q: qz, Ae, Fa, Mt: Fa * ecc });
+    }
+    const F = niv.reduce((s, n) => s + n.Fa, 0), M = niv.reduce((s, n) => s + n.Fa * n.nivel, 0);
+    out.push({ dir: d, l1, l2, r: l1 / l2, hl: H / l1, ca: ca.ca, caFora: ca.fora, ecc, niv, F, M, faixa0: hp / 2 });
+  }
+  return { alta, viz, k, casos: out };
+}
+
+/* --- força de atrito (6.1.5): só se ℓ2/h > 4 ou ℓ2/ℓ1 > 4 --- */
+function atritoForcas(L) {
+  const { res, q } = L; if (res.iso) return null;
+  const g = res.geo, h = g.h, ctT = +(ed.ctTelhado || 0.04), ctP = +(ed.ctParedes || 0.04), qk = KN(q), out = [];
+  for (const d of [0, 90]) {
+    const l1 = d === 0 ? g.b : g.a, l2 = d === 0 ? g.a : g.b;
+    let Ft = 0, nota = '';
+    if ((res.tipo === 't10' || res.tipo === 't11') && d === 0) nota = 'Já incluída nos Ce das Tabelas 10/11 para α = 0°.';
+    else if (res.tipo === 't12' && d === 0) { Ft = 0.1 * qk * g.a * g.b; nota = 'Tabela 12, α = 0°: Ft = Ct·q·a·b, Ct = 0,1 (α = 180°: Ct = 0,001θ + 0,02).'; }
+    else if (l2 / h > 4 || l2 / l1 > 4) {
+      const m = h <= l1 ? h : l1;
+      Ft = ctT * qk * l1 * Math.max(0, l2 - 4 * m) + ctP * qk * 2 * h * Math.max(0, l2 - 4 * m);
+      nota = `ℓ2/h = ${fmt(l2 / h, 2)}, ℓ2/ℓ1 = ${fmt(l2 / l1, 2)} > 4: Ft = Ct·q·ℓ1·(ℓ2 − 4${h <= l1 ? 'h' : 'ℓ1'}) + Ct·q·2h·(ℓ2 − 4${h <= l1 ? 'h' : 'ℓ1'}).`;
+    } else nota = `ℓ2/h = ${fmt(l2 / h, 2)} e ℓ2/ℓ1 = ${fmt(l2 / l1, 2)} ≤ 4: força de atrito não precisa ser considerada.`;
+    out.push({ dir: d, l1, l2, Ft, nota });
+  }
+  return { ctT, ctP, casos: out };
+}
+
+/* --- coberturas isoladas: resultante do diagrama e reações por linha de pilares --- */
+function isoladaResultantes(L) {
+  const { res, q } = L; if (!res.iso) return null;
+  const g = res.geo, qk = KN(q), l2 = g.l2, th = Math.atan(g.tg), A = g.a * l2 / Math.cos(th);
+  const d1 = +ed.pil1, d2 = +ed.pil2, temPil = d1 >= 0 && d2 > d1 && d2 <= l2 + 1e-6;
+  const reac = (Fv, x, inv) => { if (!temPil) return null; const p1 = inv ? l2 - d2 : d1, p2 = inv ? l2 - d1 : d2; const R1 = Fv * (p2 - x) / (p2 - p1); return inv ? [Fv - R1, R1] : [R1, Fv - R1]; };
+  const out = [];
+  if (!res.iso.duas) {
+    for (const [k, nome, inv] of [['desc', 'vento pela borda alta', false], ['asc', 'vento pela borda baixa', true]]) {
+      for (const [ci, cn] of [['c1', 'Carregamento 1'], ['c2', 'Carregamento 2']]) {
+        const s = res.iso[k][ci]; if (!s) continue;
+        const cB = inv ? s.BB : s.BA, cS = inv ? s.BA : s.BB;      // barlavento / sotavento
+        const F = qk * (cB + cS) / 2 * A, x = Math.abs(cB + cS) > 1e-9 ? l2 / 3 * (cB + 2 * cS) / (cB + cS) : l2 / 2;
+        const Fv = F * Math.cos(th), Fh = Math.abs(F * Math.sin(th));
+        out.push({ caso: nome, carr: cn, F, x, Fv, Fh, R: reac(Fv, x, inv), pB: qk * cB, pS: qk * cS });   // F > 0 para baixo; x a partir da borda de barlavento
+      }
+    }
+  } else {
+    const t = res.iso.t25;
+    for (const [ci, cn] of [['c1', 'Carregamento 1'], ['c2', 'Carregamento 2']]) {
+      const F1 = qk * t[ci].pb * A / 2, F2 = qk * t[ci].ps * A / 2, F = F1 + F2;
+      const x = Math.abs(F) > 1e-9 ? (F1 * l2 / 4 + F2 * 3 * l2 / 4) / F : l2 / 2;
+      const sg = res.iso.calha ? -1 : 1;   // calha (V): sentido positivo para cima
+      out.push({ caso: 'vento perpendicular à geratriz', carr: cn, F: sg * F, x, Fv: sg * F * Math.cos(th), Fh: Math.abs((F1 - F2) * Math.sin(th)), R: reac(sg * F * Math.cos(th), x, false), duas: true, calha: !!res.iso.calha, p1: sg * qk * t[ci].pb, p2: sg * qk * t[ci].ps });
+    }
+  }
+  return { A, l2, d1, d2, temPil, casos: out };
+}
+
+/* ============================================================
+   INTERFACE DA ESTRUTURA — plantas no estilo das figuras do manual CBCA (coeficientes e cargas),
+   pórtico, arrasto por nível, atrito, resultantes da cobertura isolada e editor de aberturas (cpi detalhado)
+   ============================================================ */
+const subId = id => id.replace(/([A-Za-z])(\d)(?![\d.])/g, '$1<tspan baseline-shift="sub" font-size="75%">$2</tspan>');
+const sgn = (v, d) => (v > 0 ? '+' : '') + fmt(v, d);
+const HATCH = `<defs><pattern id="hch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff"/><line x1="0" y1="0" x2="0" y2="6" stroke="#c8553d" stroke-width="1.8"/></pattern></defs>`;
+
+/* --- planta no estilo da Figura 26: modo 'coef' (Ce da norma) ou 'carga' (kgf/m²) --- */
+function planoSVG(caso, res, modo, L) {
+  const g = res.geo, { a, b } = g, W = 640, mx = 140, my = 104;
+  const s = Math.min((W - 2 * mx) / a, (470 - 2 * my) / b), H = Math.round(b * s + 2 * my + 52), ox = (W - a * s) / 2, oy = my + 22;
+  const X = x => ox + x * s, Y = y => oy + (b - y) * s, coef = modo === 'coef';
+  const val = z => coef ? z.ce : pNoc(z.p), txt = v => coef ? sgn(v, 2) : sgn(v, 1);
+  const vmax = coef ? 1.2 : Math.max(...[...caso.paredes, ...caso.cobertura].map(z => Math.abs(pNoc(z.p))), 1);
+  let o = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="${FIG.serif}" font-size="12">${HATCH}`;
+  o += `<text x="${W / 2}" y="18" text-anchor="middle" font-size="14" fill="${FIG.txt}">${coef ? 'Coeficientes de forma Ce' : 'Cargas p = q·(Ce − cpi), kgf/m²'} — vento ${caso.dir}°</text>`;
+  // cobertura
+  o += `<rect x="${X(0)}" y="${Y(b)}" width="${a * s}" height="${b * s}" fill="${FIG.fill}" stroke="none"/>`;
+  for (const z of caso.cobertura) {
+    const x0 = X(z.x0), x1 = X(z.x1), y0 = Y(z.y1), y1 = Y(z.y0), v = val(z);
+    if (!coef) { const t = Math.min(1, Math.abs(v) / vmax) * 0.55; o += `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="${v < 0 ? FIG.succ : FIG.press}" fill-opacity="${t.toFixed(2)}"/>`; }
+    o += `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="none" stroke="#8c8c8c" stroke-dasharray="5 4" stroke-width="0.9"/>`;
+    if (x1 - x0 > 30 && y1 - y0 > 26) {
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, vert = x1 - x0 < 52, rot = vert ? ` transform="rotate(-90 ${cx} ${cy})"` : '';
+      o += `<text x="${cx}" y="${cy - 3}" text-anchor="middle" font-style="italic" fill="${FIG.txt}"${rot}>${subId(z.id)}</text><text x="${cx}" y="${cy + 13}" text-anchor="middle" fill="${FIG.txt}"${rot}>${txt(v)}</text>`;
+    }
+  }
+  if (res.tipo === 't7' || res.tipo === 'predio' || res.tipo === 't9') o += `<line x1="${X(0)}" x2="${X(a)}" y1="${Y(b / 2)}" y2="${Y(b / 2)}" stroke="#6b6b6b" stroke-dasharray="${res.tipo === 't9' ? '8 4' : '14 4 3 4'}"/>`;
+  o += `<rect x="${X(0)}" y="${Y(b)}" width="${a * s}" height="${b * s}" fill="none" stroke="${FIG.linha}" stroke-width="2.6"/>`;
+  // regiões de cpe médio da cobertura (Tabela 7) só na planta de coeficientes
+  if (coef && (res.tipo === 't7' || res.tipo === 'predio') && g.y) {
+    const y = g.y * s, x = (g.x || 0) * s;
+    for (const [xx, yy, ww, hh] of [[X(0), Y(b), y, b * s], [X(a) - y, Y(b), y, b * s], [X(0) + y, Y(b), Math.max(0, x - y), y], [X(a) - x, Y(b), Math.max(0, x - y), y], [X(0) + y, Y(0) - y, Math.max(0, x - y), y], [X(a) - x, Y(0) - y, Math.max(0, x - y), y], [X(0), Y(b / 2) - y, a * s, 2 * y]])
+      if (ww > 0.5 && hh > 0.5) o += `<rect x="${xx}" y="${yy}" width="${ww}" height="${hh}" fill="url(#hch)" fill-opacity="0.45" stroke="#c8553d" stroke-width="0.6"/>`;
+  }
+  // paredes: setas para dentro (sobrepressão, cinza) ou para fora (sucção, vermelho)
+  const seta = (x, y, nx, ny, v) => {
+    const len = 10 + 34 * Math.min(1, Math.abs(v) / vmax), col = v < 0 ? FIG.succ : FIG.press;
+    const [x0, y0, x1, y1] = v < 0 ? [x + nx * 3, y + ny * 3, x + nx * (3 + len), y + ny * (3 + len)] : [x + nx * (3 + len), y + ny * (3 + len), x + nx * 3, y + ny * 3];
+    const ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+    return `<line x1="${x0}" y1="${y0}" x2="${x1 - ux * 6}" y2="${y1 - uy * 6}" stroke="${col}" stroke-width="4"/><path d="M${x1},${y1} L${x1 - ux * 9 - uy * 5},${y1 - uy * 9 + ux * 5} L${x1 - ux * 9 + uy * 5},${y1 - uy * 9 - ux * 5} Z" fill="${col}"/>`;
+  };
+  for (const w of caso.paredes) {
+    const v = val(w), horiz = w.lado === 'S' || w.lado === 'N';
+    const p0 = horiz ? X(w.x0) : Y(w.x1), p1 = horiz ? X(w.x1) : Y(w.x0), n = Math.max(1, Math.round(Math.abs(p1 - p0) / 62));
+    const nx = { S: 0, N: 0, W: -1, E: 1 }[w.lado], ny = { S: 1, N: -1, W: 0, E: 0 }[w.lado];
+    const base = { S: Y(0), N: Y(b), W: X(0), E: X(a) }[w.lado];
+    for (let i = 0; i < n; i++) { const t = p0 + (p1 - p0) * (i + 0.5) / n; o += horiz ? seta(t, base, nx, ny, v) : seta(base, t, nx, ny, v); }
+    if (Math.abs(p1 - p0) > 14) o += `<line x1="${horiz ? p0 : base}" y1="${horiz ? base : p0}" x2="${horiz ? p0 : base}" y2="${horiz ? base : p0}" stroke="${FIG.linha}"/>`;
+    // rótulo da zona (dentro) e valor (fora)
+    const mid = (p0 + p1) / 2, fora = horiz ? 64 : 58;
+    const [vx, vy] = horiz ? [mid, base + ny * fora] : [base + nx * fora, mid];
+    if (Math.abs(p1 - p0) > 22) {
+      o += `<text x="${vx}" y="${vy + 4}" text-anchor="${horiz ? 'middle' : nx < 0 ? 'end' : 'start'}" font-size="11.5" fill="${v < 0 ? FIG.succ : FIG.press}"><tspan font-style="italic" fill="${FIG.txt}">${subId(w.id.split('/')[0])}</tspan> ${txt(v)}</text>`;
+    }
+  }
+  // faixas de cpe médio nas paredes paralelas ao vento (junto à aresta de barlavento)
+  const lc = g.Lcpe * s, wl = { 0: ['S', 'N', 'ini'], 180: ['S', 'N', 'fim'], 90: ['W', 'E', 'ini'], 270: ['W', 'E', 'fim'] }[caso.dir];
+  for (const lado of wl.slice(0, 2)) {
+    const horiz = lado === 'S' || lado === 'N', len = horiz ? a * s : b * s;
+    let p = wl[2] === 'ini' ? (horiz ? X(0) : Y(0) - lc) : (horiz ? X(a) - lc : Y(b));
+    const t = 9, base = { S: Y(0), N: Y(b) - t, W: X(0) - t, E: X(a) }[lado];
+    o += horiz ? `<rect x="${p}" y="${base}" width="${lc}" height="${t}" fill="url(#hch)" stroke="#c8553d" stroke-width="0.8"/>` : `<rect x="${base}" y="${p}" width="${t}" height="${lc}" fill="url(#hch)" stroke="#c8553d" stroke-width="0.8"/>`;
+    void len;
+  }
+  // vento
+  const ar = { 0: [X(0) - 96, Y(b) - 34, 0], 180: [X(a) + 96, Y(b) - 34, 180], 90: [X(0) - 70, Y(0) + 46, -90], 270: [X(0) - 70, Y(b) - 46, 90] }[caso.dir];
+  o += `<g transform="translate(${ar[0]} ${ar[1]}) rotate(${ar[2]})"><line x1="-24" x2="12" y1="0" y2="0" stroke="${FIG.vento}" stroke-width="3.5"/><path d="M12,-7 L25,0 L12,7 Z" fill="${FIG.vento}"/></g>`;
+  o += `<text x="${ar[0] + (caso.dir === 90 || caso.dir === 270 ? -14 : 0)}" y="${ar[1] + (caso.dir === 0 || caso.dir === 180 ? -14 : 4)}" text-anchor="${caso.dir === 90 || caso.dir === 270 ? 'end' : 'middle'}" font-size="13" fill="${FIG.vento}">vento ${caso.dir}°</text>`;
+  // cotas e legenda
+  o += `<text x="${(X(0) + X(a)) / 2}" y="${Y(0) + 92}" text-anchor="middle" fill="#555" font-size="11">a = ${fmt(a, 2)} m</text>`;
+  o += `<text x="${X(a) + 122}" y="${(Y(0) + Y(b)) / 2}" fill="#555" font-size="11" transform="rotate(90 ${X(a) + 122} ${(Y(0) + Y(b)) / 2})" text-anchor="middle">b = ${fmt(b, 2)} m</text>`;
+  const locP = L.pr.env.locais.find(l => l.grupo === 'paredes');
+  o += `<g transform="translate(14 ${H - 10})" font-size="11" fill="#444"><path d="M0,-5 L16,-5" stroke="${FIG.press}" stroke-width="4"/><path d="M16,-10 L24,-5 L16,0Z" fill="${FIG.press}"/><text x="30" y="-1">sobrepressão</text>`
+    + `<path d="M120,-5 L136,-5" stroke="${FIG.succ}" stroke-width="4"/><path d="M136,-10 L144,-5 L136,0Z" fill="${FIG.succ}"/><text x="150" y="-1">sucção</text>`
+    + `<rect x="210" y="-11" width="22" height="10" fill="url(#hch)" stroke="#c8553d" stroke-width="0.8"/><text x="238" y="-1">faixa de cpe,médio${locP ? `: ${fmt(g.Lcpe, 2)} m — ${coef ? 'cpe = ' + sgn(locP.cpe, 2) : 'p = ' + sgn(locP.pNeg, 1) + ' kgf/m²'}` : ''}</text></g>`;
+  return o + '</svg>';
+}
+
+/* --- desenho do pórtico (reaproveita o corte, com as cargas em kgf/m) --- */
+function porticoSVGs(L, P) {
+  const { res, pr } = L, out = [];
+  for (const cp of P.casos) {
+    const cs = pr.casos.find(c => c.dir === cp.dir);
+    for (const [k, ci, rot] of [['wMax', cp.cpiMax, 'maior'], ['wMin', cp.cpiMin, 'menor']]) {
+      if (k === 'wMin' && Math.abs(cp.cpiMax - cp.cpiMin) < 1e-9) continue;
+      const byId = Object.fromEntries(cp.el.map(e => [e.id + '|' + e.nome, e[k]]));
+      const roofEl = cp.el.slice(1, -1), w0 = cp.el[0][k], w1 = cp.el[cp.el.length - 1][k];
+      let caso;
+      if (cp.dir !== 0) {
+        caso = { ...cs, cobertura: cs.cobertura.map(z => { const e = roofEl.find(r => r.id === z.id); return { ...z, p: { min: e ? e[k] : 0, max: e ? e[k] : 0 } }; }),
+          paredes: cs.paredes.map(w => ({ ...w, p: { min: w.id === cp.el[0].id ? w0 : w1, max: w.id === cp.el[0].id ? w0 : w1 } })) };
+      } else { // primeiro pórtico: corte transversal, vento perpendicular ao plano
+        const c90 = pr.casos.find(c => c.dir === 90), zx = cs.cobertura.filter(z => cp.x >= z.x0 - 1e-6 && cp.x <= z.x1 + 1e-6);
+        caso = { ...c90, dir: 90, cobertura: zx.map(z => ({ ...z, x0: 0, x1: res.geo.a, p: { min: roofEl.find(r => r.id === z.id)?.[k] ?? 0, max: roofEl.find(r => r.id === z.id)?.[k] ?? 0 } })),
+          paredes: [{ lado: 'S', id: cp.el[0].id, ce: 0, p: { min: w0, max: w0 } }, { lado: 'N', id: cp.el[cp.el.length - 1].id, ce: 0, p: { min: w1, max: w1 } }] };
+      }
+      const pm = Math.max(...cp.el.map(e => Math.max(Math.abs(e.wMax), Math.abs(e.wMin))), 0.01);
+      out.push({ dir: cp.dir, svg: corteSVG(caso, res, pm, null, { dec: 1, semId: true, titulo: `${cp.dir === 0 ? '1º pórtico (x = ' + fmt(cp.x, 2) + ' m), vento 0°' : 'Vento ' + cp.dir + '°'} — ${rot} pressão interna, cpi = ${sgn(ci, 2)}`, unid: `cargas em kgf/m no pórtico (q = ${fmt(P.qk, 1)} kgf/m²; pórticos a cada ${fmt(P.e, 2)} m)`, rodape: 'pórtico', foraDoPlano: cp.dir === 0 }) });
+      void byId;
+    }
+  }
+  return out;
+}
+
+/* --- Figura 53: faixas de influência e forças de arrasto por nível --- */
+function niveisSVG(A, c, H) {
+  const W = 620, Hs = 380, top = 40, bot = 34, sz = (Hs - top - bot) / H, bw = Math.min(200, 200 * c.l1 / Math.max(c.l1, H / 2)), x0 = 70;
+  const Z = z => Hs - bot - z * sz;
+  let o = `<svg viewBox="0 0 ${W} ${Hs}" xmlns="http://www.w3.org/2000/svg" font-family="${FIG.serif}" font-size="11">`;
+  o += `<text x="${W / 2}" y="18" text-anchor="middle" font-size="13" fill="${FIG.txt}">Vento ${c.dir}°: fachada com ℓ1 = ${fmt(c.l1, 2)} m; Ca = ${fmt(c.ca, 2)}</text>`;
+  o += `<rect x="${x0}" y="${Z(c.faixa0)}" width="${bw}" height="${Z(0) - Z(c.faixa0)}" fill="#f7f4ef" stroke="#999"/>`;
+  o += `<text x="${x0 + bw / 2}" y="${(Z(0) + Z(c.faixa0)) / 2 + 4}" text-anchor="middle" font-style="italic" font-size="10" fill="#666">transmitida à fundação</text>`;
+  c.niv.forEach((n, i) => {
+    o += `<rect x="${x0}" y="${Z(n.z1)}" width="${bw}" height="${Z(n.z0) - Z(n.z1)}" fill="${i % 2 ? '#e6e1da' : '#d5cfc6'}" stroke="#888" stroke-dasharray="5 3"/>`;
+    if (Z(n.z0) - Z(n.z1) > 22) o += `<text x="${x0 + bw / 2}" y="${(Z(n.z0) + Z(n.z1)) / 2 + 4}" text-anchor="middle" font-size="10" fill="${FIG.txt}">Ae = ${fmt(n.Ae, 2)} m² · q = ${fmt(n.q, 1)} kgf/m²</text>`;
+    o += `<text x="${x0 - 6}" y="${Z(n.nivel) + 4}" text-anchor="end" font-size="10" fill="#555">${fmt(n.nivel, 1)}</text>`;
+  });
+  o += `<rect x="${x0}" y="${Z(H)}" width="${bw}" height="${Z(0) - Z(H)}" fill="none" stroke="${FIG.linha}" stroke-width="2"/><line x1="${x0 - 20}" x2="${x0 + bw + 20}" y1="${Z(0)}" y2="${Z(0)}" stroke="${FIG.linha}"/>`;
+  // esquema lateral com as forças
+  const sx = x0 + bw + 150, fmax = Math.max(...c.niv.map(n => n.Fa));
+  o += `<rect x="${sx}" y="${Z(H)}" width="44" height="${Z(0) - Z(H)}" fill="#c9c3ba" stroke="${FIG.linha}"/><line x1="${sx - 40}" x2="${sx + 120}" y1="${Z(0)}" y2="${Z(0)}" stroke="${FIG.linha}"/>`;
+  for (const n of c.niv) { const len = 14 + 46 * n.Fa / fmax, y = Z(n.nivel); o += `<line x1="${sx + 44}" x2="${sx + 44 + len - 8}" y1="${y}" y2="${y}" stroke="#333" stroke-width="4"/><path d="M${sx + 44 + len},${y} l-10,-6 l0,12 Z" fill="#333"/><text x="${sx + 50 + len}" y="${y + 4}" fill="${FIG.txt}">${fmt(n.Fa, 0)} kgf</text>`; }
+  o += `<g transform="translate(${sx - 30} ${Z(H * 0.7)})"><line x1="-20" x2="8" stroke="${FIG.vento}" stroke-width="3"/><path d="M8,-6 L18,0 L8,6Z" fill="${FIG.vento}"/></g><text x="${sx - 32}" y="${Z(H * 0.7) - 10}" text-anchor="middle" fill="${FIG.vento}">vento</text>`;
+  o += `<text x="${W - 8}" y="${Hs - 8}" text-anchor="end" font-size="10" fill="#666">faixas entre as meias-alturas dos andares; q no topo de cada faixa · esquema lateral sem escala</text>`;
+  return o + '</svg>';
+}
+
+/* --- Figura 49: carregamento da cobertura isolada com a resultante e as reações --- */
+function isoResSVG(L, R, cso) {
+  const W = 340, H = 276, x0 = 54, x1 = 296, l2 = R.l2, X = sv => x0 + (x1 - x0) * sv / l2, yG = 206;
+  const duas = !!cso.duas, inv = /baixa/.test(cso.caso), yHi = 112, yLo = yHi + Math.min(40, Math.max(14, (L.res.geo.tg || 0) * (x1 - x0) * (duas ? 0.5 : 1) * 1.6));
+  // perfil (borda de barlavento à esquerda): uma água desce (borda alta) ou sobe (borda baixa); duas águas: cumeeira ou calha no meio
+  const Yr = sv => duas ? (cso.calha ? yHi + (yLo - yHi) * (1 - Math.abs(2 * sv / l2 - 1)) : yLo - (yLo - yHi) * (1 - Math.abs(2 * sv / l2 - 1))) : inv ? yLo - (yLo - yHi) * sv / l2 : yHi + (yLo - yHi) * sv / l2;
+  const pAt = sv => duas ? (sv < l2 / 2 ? cso.p1 : cso.p2) : cso.pB + (cso.pS - cso.pB) * sv / l2;   // kgf/m², > 0 para baixo
+  const pm = Math.max(Math.abs(cso.pB ?? cso.p1), Math.abs(cso.pS ?? cso.p2), 1e-6), k = 44 / pm;
+  let o = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="${FIG.serif}" font-size="11">`;
+  o += `<text x="${W / 2}" y="15" text-anchor="middle" font-size="12.5" fill="${FIG.txt}">${cso.carr} — ${cso.caso}</text>`;
+  // diagrama de pressões acima da cobertura
+  const N = 40, top = [], segs = duas ? [[0, l2 / 2], [l2 / 2, l2]] : [[0, l2]];
+  for (const [sa, sb] of segs) {
+    const pts = []; for (let i = 0; i <= N; i++) { const sv = sa + (sb - sa) * i / N, sv2 = Math.min(Math.max(sv, sa + 1e-6), sb - 1e-6); pts.push([X(sv), Yr(sv) - 4 - Math.abs(pAt(sv2)) * k]); }
+    const pv = pAt((sa + sb) / 2), col = pv < 0 ? FIG.succ : FIG.press;
+    o += `<polygon points="${pts.map(p => p.join(',')).join(' ')} ${X(sb)},${Yr(sb) - 4} ${X(sa)},${Yr(sa) - 4}" fill="${col}" fill-opacity="0.16" stroke="${col}" stroke-width="1.2"/>`;
+    top.push(pts);
+    for (let i = 1; i < 6; i++) { const sv = sa + (sb - sa) * i / 6, p = pAt(sv), yr = Yr(sv) - 4, yt = yr - Math.abs(p) * k, c2 = p < 0 ? FIG.succ : FIG.press;
+      if (Math.abs(p) * k < 8) continue;
+      o += p > 0 ? `<line x1="${X(sv)}" x2="${X(sv)}" y1="${yt + 2}" y2="${yr - 6}" stroke="${c2}" stroke-width="1.6"/><path d="M${X(sv) - 3.5},${yr - 8} L${X(sv)},${yr - 1} L${X(sv) + 3.5},${yr - 8}Z" fill="${c2}"/>`
+                 : `<line x1="${X(sv)}" x2="${X(sv)}" y1="${yr - 1}" y2="${yt + 7}" stroke="${c2}" stroke-width="1.6"/><path d="M${X(sv) - 3.5},${yt + 8} L${X(sv)},${yt + 1} L${X(sv) + 3.5},${yt + 8}Z" fill="${c2}"/>`; }
+    const pa = pAt(sa + 1e-6), pb = pAt(sb - 1e-6);
+    o += `<text x="${X(sa) + 2}" y="${Yr(sa) - 8 - Math.abs(pa) * k}" font-size="10.5" fill="${FIG.txt}">${sgn(pa, 1)}</text>`;
+    if (!duas || sb === l2) o += `<text x="${X(sb) - 2}" y="${Yr(sb) - 8 - Math.abs(pb) * k}" text-anchor="end" font-size="10.5" fill="${FIG.txt}">${sgn(pb, 1)}</text>`;
+  }
+  // cobertura e pilares
+  o += `<polyline fill="none" stroke="${FIG.linha}" stroke-width="3.2" points="${Array.from({ length: 41 }, (_, i) => X(l2 * i / 40) + ',' + Yr(l2 * i / 40)).join(' ')}"/>`;
+  o += `<line x1="${x0 - 26}" x2="${x1 + 26}" y1="${yG}" y2="${yG}" stroke="${FIG.linha}"/>`;
+  for (let i = 0; i < 11; i++) o += `<line x1="${x0 - 22 + i * 26}" x2="${x0 - 30 + i * 26}" y1="${yG}" y2="${yG + 7}" stroke="#888"/>`;
+  const pil = R.temPil ? [R.d1, R.d2].map(d => inv ? l2 - d : d) : [];
+  pil.forEach((sv, i) => {
+    o += `<line x1="${X(sv)}" x2="${X(sv)}" y1="${Yr(sv)}" y2="${yG}" stroke="#7a7a7a" stroke-width="6"/>`;
+    if (cso.R) { const r = cso.R[i], comp = r >= 0, c2 = comp ? FIG.press : FIG.succ;   // reação: compressão (seta para cima no apoio) ou tração
+      o += comp ? `<line x1="${X(sv)}" x2="${X(sv)}" y1="${yG + 26}" y2="${yG + 6}" stroke="${c2}" stroke-width="2.2"/><path d="M${X(sv) - 4},${yG + 9} L${X(sv)},${yG + 1} L${X(sv) + 4},${yG + 9}Z" fill="${c2}"/>`
+                : `<line x1="${X(sv)}" x2="${X(sv)}" y1="${yG + 2}" y2="${yG + 20}" stroke="${c2}" stroke-width="2.2"/><path d="M${X(sv) - 4},${yG + 18} L${X(sv)},${yG + 26} L${X(sv) + 4},${yG + 18}Z" fill="${c2}"/>`;
+      const tx = Math.min(W - 44, Math.max(44, X(sv)));
+      o += `<text x="${tx}" y="${yG + 38}" text-anchor="middle" font-size="10.5" fill="${c2}">R${i + 1} = ${fmt(Math.abs(r), 0)} kgf</text><text x="${tx}" y="${yG + 50}" text-anchor="middle" font-size="9.5" fill="${c2}">${comp ? 'compressão' : 'tração'}</text>`; }
+  });
+  // resultante abaixo da cobertura
+  const up = cso.Fv < 0, col = up ? FIG.succ : FIG.press, xr = X(cso.x), yr = Yr(cso.x);
+  o += up ? `<line x1="${xr}" x2="${xr}" y1="${yr + 50}" y2="${yr + 14}" stroke="${col}" stroke-width="3.4"/><path d="M${xr - 7},${yr + 16} L${xr},${yr + 4} L${xr + 7},${yr + 16}Z" fill="${col}"/>`
+          : `<line x1="${xr}" x2="${xr}" y1="${yr + 6}" y2="${yr + 40}" stroke="${col}" stroke-width="3.4"/><path d="M${xr - 7},${yr + 38} L${xr},${yr + 50} L${xr + 7},${yr + 38}Z" fill="${col}"/>`;
+  o += `<text x="${xr + 10}" y="${yr + 34}" font-size="11.5" fill="${col}">Fv = ${fmt(Math.abs(cso.Fv), 0)} kgf</text><text x="${xr + 10}" y="${yr + 48}" font-size="10" fill="#555">x = ${fmt(cso.x, 2)} m</text>`;
+  // vento e legenda
+  o += `<g transform="translate(24 ${yHi - 34})"><line x1="-12" x2="12" stroke="${FIG.vento}" stroke-width="3"/><path d="M12,-6 L22,0 L12,6Z" fill="${FIG.vento}"/></g><text x="26" y="${yHi - 44}" text-anchor="middle" font-size="10.5" fill="${FIG.vento}">vento</text>`;
+  o += `<text x="${W / 2}" y="${H - 3}" text-anchor="middle" font-size="9.5" fill="#666">p em kgf/m² · x medido da borda de barlavento${R.temPil ? '' : ' · informe as linhas de pilares para as reações'}</text>`;
+  return o + '</svg>';
+}
+
+/* --- formulário: dados da estrutura e editor de aberturas (cpi detalhado) --- */
+function estruturaForm() {
+  const t = ed.tipo, iso = isIso(t), c = ed.cpi, num = v => parseFloat(String(v).replace(',', '.'));
+  const f = (id, lbl, v, ex = '') => `<label for="${id}">${lbl}</label><input id="${id}" type="number" value="${v ?? ''}" ${ex}>`;
+  const sel = (id, lbl, v, opts) => `<label for="${id}">${lbl}</label><select id="${id}">${opts.map(([k, n]) => `<option value="${k}"${String(v) === String(k) ? ' selected' : ''}>${n}</option>`).join('')}</select>`;
+  let h = '';
+  if (iso) h += f('esP1', 'Linha de pilares 1 — distância à borda alta (m)', ed.pil1, 'step="0.1" min="0"') + f('esP2', 'Linha de pilares 2 — distância à borda alta (m)', ed.pil2, 'step="0.1" min="0"');
+  else {
+    if (t !== 'predio') h += f('esE', 'Distância entre pórticos (m)', ed.eport, 'step="0.1" min="0"');
+    const ct = [['0.01', '0,01 — sem nervuras transversais'], ['0.02', '0,02 — ondulações transversais'], ['0.04', '0,04 — nervuras retangulares transversais']];
+    h += sel('esCtT', 'Atrito — Ct do telhado', ed.ctTelhado, ct) + sel('esCtP', 'Atrito — Ct das paredes', ed.ctParedes, ct);
+    h += sel('esAlta', 'Turbulência do vento (6.1.3)', ed.altaTurb ? 1 : 0, [[0, 'Baixa (Figura 4) — a favor da segurança'], [1, 'Alta (Figura 5; sotavento 2/3)']]);
+    if (t === 'predio') h += sel('esViz', 'Excentricidade (6.1.4)', ed.vizinhanca ? 1 : 0, [[0, '0,075·a e 0,075·b — sem vizinhança'], [1, '0,15·a e 0,15·b — com vizinhança']]);
+  }
+  cg('cgEstBox').innerHTML = `<legend>Estrutura</legend><div class="frm">${h}</div>`;
+  const bind = (id, fn, rebuild) => { const el = cg(id); if (el) el.addEventListener('input', () => { fn(el.value); saveEd(); renderCargas(!!rebuild); }); };
+  bind('esP1', v => ed.pil1 = v); bind('esP2', v => ed.pil2 = v); bind('esE', v => ed.eport = num(v));
+  bind('esCtT', v => ed.ctTelhado = +v); bind('esCtP', v => ed.ctParedes = +v); bind('esAlta', v => ed.altaTurb = v === '1'); bind('esViz', v => ed.vizinhanca = v === '1');
+  // editor de aberturas
+  const box = cg('cgDetBox'); if (!box) return;
+  if (c.modo !== 'detalhado') { box.innerHTML = ''; return; }
+  c.aberturas = c.aberturas || []; if (c.fundo == null) c.fundo = 0.1; if (c.forroPerm == null) c.forroPerm = true;
+  const faces = [['S', 'Parede y = 0 (fachada 90°)'], ['N', 'Parede y = b (fachada 270°)'], ['W', 'Oitão x = 0 (0°)'], ['E', 'Oitão x = a (180°)'], ['C1', 'Cobertura — água y < b/2'], ['C2', 'Cobertura — água y > b/2'], ['LT', 'Lanternim (cumeeira, metade em cada água)'], ['CT', 'Cobertura toda']];
+  let t2 = `<div class="frm" style="margin-top:8px">${f('esFundo', 'Permeabilidade de fundo (% de cada face)', c.fundo, 'step="0.01" min="0"')}${sel('esForro', 'Cobertura no cálculo', c.forroPerm ? 1 : 0, [[1, 'Sim — sem forro ou forro permeável'], [0, 'Não — forro estanque']])}</div>`;
+  t2 += c.aberturas.map((o, i) => `<div class="abcard"><div class="abr"><input data-i="${i}" data-k="nome" value="${escapeHtml(o.nome || '')}" aria-label="Nome da abertura"><button data-del="${i}" title="remover">✕</button></div>` +
+    `<select data-i="${i}" data-k="face" aria-label="Face">${faces.map(([k, n]) => `<option value="${k}"${o.face === k ? ' selected' : ''}>${n}</option>`).join('')}</select>` +
+    `<div class="abr"><label>Área (m²)<input data-i="${i}" data-k="area" type="number" step="0.1" value="${o.area ?? ''}"></label><label>x (m)<input data-i="${i}" data-k="x" type="number" step="0.1" value="${o.x ?? ''}" placeholder="distrib."></label><label class="abop"><input data-i="${i}" data-k="oper" type="checkbox"${o.oper ? ' checked' : ''}> operável</label></div></div>`).join('');
+  t2 += `<button id="esAdd" style="margin-top:6px">+ Abertura</button><div class="hint">x = posição do centro ao longo da face (vazio = distribuída). Aberturas operáveis geram todas as combinações abertas/fechadas (até 12 aberturas).</div>`;
+  box.innerHTML = t2;
+  bind('esFundo', v => c.fundo = num(v)); bind('esForro', v => c.forroPerm = v === '1');
+  box.querySelectorAll('[data-i]').forEach(el => el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => {
+    const o = c.aberturas[+el.dataset.i], k = el.dataset.k;
+    o[k] = k === 'oper' ? el.checked : k === 'area' ? num(el.value) : k === 'x' ? (el.value === '' ? '' : num(el.value)) : el.value;
+    saveEd(); renderCargas(false);
+  }));
+  box.querySelectorAll('[data-del]').forEach(bt => bt.onclick = () => { c.aberturas.splice(+bt.dataset.del, 1); saveEd(); renderCargas(true); });
+  cg('esAdd').onclick = () => { c.aberturas.push({ nome: 'Abertura ' + (c.aberturas.length + 1), face: 'S', area: 10, x: '', oper: true }); saveEd(); renderCargas(true); };
+}
+
+/* --- resultados da estrutura (janela e memorial) --- */
+function estruturaHTML(L, mem) {
+  const { res } = L, f2 = v => fmt(v, 2), cls = mem ? ' class="n"' : '';
+  const T = (cab, linhas) => `<table class="prof" style="margin-top:6px"><thead><tr>${cab.map((c, i) => `<th${i ? cls : ' style="text-align:left"'}>${c}</th>`).join('')}</tr></thead><tbody>${linhas.map(l => `<tr>${l.map((v, i) => `<td${i ? cls : ' style="text-align:left"'}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  const H3 = t => mem ? `<h3 style="margin-top:14px">${t}</h3>` : `<h3 class="cgh">${t}</h3>`;
+  let h = '';
+  // cpi pelo método detalhado
+  if (res.cpiDet) {
+    h += H3('Pressão interna pelo método detalhado (6.3.3)');
+    const ext = (vs, f) => vs.reduce((m, v) => (f(v.cpi, m.cpi) ? v : m), vs[0]);
+    const L4 = [0, 90, 180, 270].map(d => { const vs = res.cpiDet.casos[d] || []; if (!vs.length) return null; const mx = ext(vs, (a, b) => a > b), mn = ext(vs, (a, b) => a < b);
+      return [d + '°', sgn(mx.cpi, 2), `<span style="float:left;text-align:left">${escapeHtml(mx.abertas)}</span>`, sgn(mn.cpi, 2), `<span style="float:left;text-align:left">${escapeHtml(mn.abertas)}</span>`]; }).filter(Boolean);
+    h += T(['Vento', 'cpi máx', 'Situação (máx)', 'cpi mín', 'Situação (mín)'], L4);
+    if (!mem) h += `<details style="margin-top:6px"><summary class="hint" style="cursor:pointer">Ver as ${res.cpiDet.nCasos} combinações de aberturas por direção</summary>` +
+      T(['Vento', 'Situação das aberturas', 'cpi'], [0, 90, 180, 270].flatMap(d => (res.cpiDet.casos[d] || []).map(v => [d + '°', `<span style="float:left;text-align:left">${escapeHtml(v.abertas)}</span>`, sgn(v.cpi, 2)]))) + '</details>';
+    h += `<p class="hint">Envoltória por direção: ${[0, 90, 180, 270].map(d => `${d}°: ${res.casos.find(c => c.dir === d).cpi.map(v => sgn(v, 2)).join(' / ')}`).join(' · ')}.</p>`;
+  }
+  // pórtico
+  const P = porticoCargas(L, +ed.eport);
+  if (P) {
+    h += H3(`Cargas no pórtico — pórticos a cada ${fmt(P.e, 2)} m (q = ${fmt(P.qk, 1)} kgf/m², positivo para dentro)`);
+    for (const cp of P.casos) h += `<p class="hint" style="margin:8px 0 0"><b>${cp.dir === 0 ? `Vento 0° — 1º pórtico junto ao oitão de barlavento (x = ${f2(cp.x)} m)` : `Vento ${cp.dir}° — pórtico intermediário`}</b></p>` +
+      T(['Elemento', 'Ce', `w (kgf/m) cpi ${sgn(cp.cpiMax, 2)}`, `w (kgf/m) cpi ${sgn(cp.cpiMin, 2)}`], cp.el.map(e => [escapeHtml(e.nome) + ` <i>${e.id}</i>`, sgn(e.ce, 2), sgn(e.wMax, 1), sgn(e.wMin, 1)]));
+    const figs = porticoSVGs(L, P);
+    h += `<div class="${mem ? 'charts' : 'cg2'}">${figs.map(fg => `<div class="${mem ? '' : 'cgdia'}">${fg.svg}</div>`).join('')}</div>`;
+  }
+  // arrasto por nível
+  const A = arrastoNiveis(L);
+  if (A) {
+    h += H3(`Forças de arrasto por nível — Ca do ábaco de ${A.alta ? 'alta' : 'baixa'} turbulência (Figura ${A.alta ? 5 : 4}); excentricidade ${fmt(A.k, 3)}·${'a/b'}`);
+    for (const c of A.casos) {
+      h += `<p class="hint" style="margin:8px 0 0"><b>Vento ${c.dir}°</b>: ℓ1 = ${f2(c.l1)} m, ℓ2 = ${f2(c.l2)} m, ℓ1/ℓ2 = ${f2(c.r)}, h/ℓ1 = ${f2(c.hl)} → <b>Ca = ${f2(c.ca)}</b>${c.caFora ? ' (fora do ábaco — valor limitado à borda)' : ''}; e = ${f2(c.ecc)} m.</p>`;
+      h += T(['Nível (m)', 'Faixa (m)', 'q (kgf/m²)', 'Ae (m²)', 'Fa (kgf)', 'Mt = Fa·e (kgf·m)'], c.niv.slice().reverse().map(n => [f2(n.nivel), `${f2(n.z0)} a ${f2(n.z1)}`, fmt(n.q, 1), f2(n.Ae), fmt(n.Fa, 0), fmt(n.Mt, 0)]).concat([['<b>Total</b>', '', '', '', `<b>${fmt(c.F, 0)}</b>`, `M base = ${fmt(c.M, 0)} kgf·m`]]));
+      h += `<div class="${mem ? '' : 'cgdia'}" style="margin-top:6px">${niveisSVG(A, c, res.geo.h)}</div>`;
+    }
+    h += `<p class="hint">Cada nível recebe a faixa entre as meias-alturas dos andares adjacentes, com q do topo da faixa (a favor da segurança); a faixa entre o solo e ${f2(res.geo.hPav / 2)} m vai direto à fundação. Aplicar Fa com a excentricidade para os dois lados do centro geométrico (momento de torção Mt).</p>`;
+  }
+  // atrito
+  const At = atritoForcas(L);
+  if (At) h += H3('Força de atrito (6.1.5)') + T(['Vento', 'ℓ1 × ℓ2 (m)', 'Ft (kgf)', 'Observação'], At.casos.map(c => [c.dir + '°', `${f2(c.l1)} × ${f2(c.l2)}`, c.Ft > 0 ? fmt(c.Ft, 0) : '—', c.nota])) + `<p class="hint">Ct do telhado = ${At.ctT}; Ct das paredes = ${At.ctP}.</p>`;
+  // cobertura isolada
+  const R = isoladaResultantes(L);
+  if (R) {
+    h += H3(`Resultantes na cobertura (A = ${f2(R.A)} m²) e reações por linha de pilares`);
+    h += T(['Caso', 'F (kgf)', 'x da borda de barlavento (m)', 'Fv (kgf)', 'Fh (kgf)', 'Reações R1 | R2 (kgf)'], R.casos.map(c => [`${c.carr} — ${c.caso}`, sgn(c.F, 0) + (c.F < 0 ? ' ↑' : ' ↓'), f2(c.x), fmt(Math.abs(c.Fv), 0), fmt(c.Fh, 0), c.R ? c.R.map(r => sgn(r, 0)).join(' | ') : 'informe as linhas de pilares']));
+    h += `<p class="hint">F > 0 para baixo. Reações nos pilares: + = compressão, − = tração / arrancamento (governa a ancoragem e a fundação).</p>`;
+    h += `<div class="${mem ? 'charts' : 'cg2'}">${R.casos.map(c => `<div class="${mem ? '' : 'cgdia'}">${isoResSVG(L, R, c)}</div>`).join('')}</div>`;
+  }
+  return h;
+}
+
+function estruturaXlsx(L) {
+  const rows = [], r2 = v => +(+v).toFixed(3);
+  if (L.res.cpiDet) { rows.push([], ['cpi — método detalhado'], ['Vento (°)', 'Situação', 'cpi']); for (const d of [0, 90, 180, 270]) (L.res.cpiDet.casos[d] || []).forEach(v => rows.push([d, v.abertas, v.cpi])); }
+  const P = porticoCargas(L, +ed.eport);
+  if (P) { rows.push([], [`Cargas no pórtico (e = ${P.e} m, q = ${r2(P.qk)} kgf/m²)`], ['Vento (°)', 'Elemento', 'Ce', 'cpi máx', 'w máx (kgf/m)', 'cpi mín', 'w mín (kgf/m)']); P.casos.forEach(c => c.el.forEach(e => rows.push([c.dir, e.nome + ' ' + e.id, e.ce, c.cpiMax, r2(e.wMax), c.cpiMin, r2(e.wMin)]))); }
+  const A = arrastoNiveis(L);
+  if (A) { rows.push([], ['Forças de arrasto por nível'], ['Vento (°)', 'Ca', 'Nível (m)', 'z0 (m)', 'z1 (m)', 'q (kgf/m²)', 'Ae (m²)', 'Fa (kgf)', 'Mt (kgf·m)']); A.casos.forEach(c => c.niv.forEach(n => rows.push([c.dir, c.ca, r2(n.nivel), r2(n.z0), r2(n.z1), r2(KN(n.q)), r2(n.Ae), r2(n.Fa), r2(n.Mt)]))); }
+  const At = atritoForcas(L);
+  if (At) { rows.push([], ['Força de atrito (6.1.5)'], ['Vento (°)', 'Ft (kgf)', 'Observação']); At.casos.forEach(c => rows.push([c.dir, r2(c.Ft), c.nota])); }
+  const R = isoladaResultantes(L);
+  if (R) { rows.push([], ['Cobertura isolada — resultantes'], ['Caso', 'F (kgf)', 'x (m)', 'Fv (kgf)', 'Fh (kgf)', 'R1 (kgf)', 'R2 (kgf)']); R.casos.forEach(c => rows.push([c.carr + ' — ' + c.caso, r2(c.F), r2(c.x), r2(c.Fv), r2(c.Fh), c.R ? r2(c.R[0]) : '', c.R ? r2(c.R[1]) : ''])); }
   return rows;
 }
 
